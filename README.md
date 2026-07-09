@@ -1,0 +1,1 @@
+arq app.worker.settings.WorkerSettings
