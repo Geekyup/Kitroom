@@ -5,5 +5,4 @@ __pycache__
 .venv
 venv
 storage/
-frontend/
 migrations/versions/__pycache__
