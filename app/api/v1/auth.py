@@ -2,6 +2,7 @@ import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi.responses import RedirectResponse
 
 from app.api.deps import get_auth_service, get_current_active_user, get_user_service
 from app.core.config import settings
@@ -71,7 +72,7 @@ async def google_login(request: Request):
     )
 
 
-@router.get("/google/callback", response_model=TokenPair)
+@router.get("/google/callback")
 async def google_callback(
     request: Request,
     service: AuthService = Depends(get_auth_service),
@@ -83,9 +84,19 @@ async def google_callback(
     if not user_info or not user_info.get("email"):
         raise InvalidToken()
 
-    return await service.login_with_google(
+    tokens = await service.login_with_google(
         google_id=user_info["sub"], email=user_info["email"]
     )
+
+    # Это редирект браузера (не fetch из JS), поэтому JSON здесь бесполезен —
+    # отдаём токены фронтенду через hash-фрагмент URL: он не улетает на сервер
+    # (ни в логи nginx/uvicorn, ни в заголовок Referer), а страница на фронте
+    # читает его через window.location.hash и сохраняет в localStorage.
+    redirect_url = (
+        f"{settings.FRONTEND_URL}/auth/google/callback"
+        f"#access_token={tokens.access_token}&refresh_token={tokens.refresh_token}"
+    )
+    return RedirectResponse(url=redirect_url)
 
 
 @router.post("/verify-email", status_code=status.HTTP_204_NO_CONTENT)

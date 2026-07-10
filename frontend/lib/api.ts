@@ -74,8 +74,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function absoluteMediaUrl(path: string): string {
   // sound_url/cover_path приходят как относительные пути вида "/static/kits/3/..."
-  // на бэкенде :8000, а не на фронте :3000 — собираем полный URL
-  return `${API_URL}${path}`
+  // на бэкенде :8000, а не на фронте :3000 — собираем полный URL.
+  // ВАЖНО: этот URL всегда попадёт в <img>/<audio> в БРАУЗЕРЕ, даже если функция
+  // вызвана на сервере (SSR) — поэтому всегда берём публичный адрес,
+  // а не внутренний docker-хостнейм (API_URL), иначе картинки/звук будут биты.
+  return `${PUBLIC_API_URL}${path}`
 }
 
 // Заглушки без реального cover_path (например, сид-скрипт для теста пагинации)

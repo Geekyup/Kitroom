@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""
 
+    # Публичный адрес фронтенда — куда редиректить браузер после google/callback
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # Session (для oauth state/nonce)
     SESSION_SECRET_KEY: str
 

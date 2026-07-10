@@ -4,8 +4,33 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState, type FormEvent } from "react"
 import { SiteHeader } from "@/components/site-header"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { authApi, AuthApiError } from "@/lib/auth"
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4">
+      <path
+        fill="#4285F4"
+        d="M23.52 12.27c0-.85-.08-1.66-.22-2.45H12v4.64h6.47c-.28 1.5-1.13 2.77-2.4 3.62v3h3.87c2.27-2.09 3.58-5.17 3.58-8.81z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.96-1.07 7.94-2.92l-3.87-3c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.27v3.11C3.24 21.3 7.28 24 12 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.27 14.27a7.2 7.2 0 0 1 0-4.54v-3.11H1.27a12 12 0 0 0 0 10.76z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.76 0 3.35.6 4.6 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0 7.28 0 3.24 2.7 1.27 6.62l3.99 3.11C6.22 6.86 8.87 4.75 12 4.75z"
+      />
+    </svg>
+  )
+}
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -224,6 +249,17 @@ export default function RegisterPage() {
             {submitting ? "Создаём аккаунт…" : "Зарегистрироваться"}
           </Button>
         </form>
+
+        <div className="mt-6 flex items-center gap-3">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs text-muted-foreground">или</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        <a href={`${API_URL}/api/v1/auth/google/login`} className={buttonVariants({ variant: "outline", size: "lg", className: "mt-4 h-11 gap-2" })}>
+          <GoogleIcon />
+          Продолжить с Google
+        </a>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Уже есть аккаунт?{" "}
