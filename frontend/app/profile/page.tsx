@@ -9,7 +9,7 @@ import { SiteHeader } from "@/components/site-header"
 import { ProfileKitList } from "@/components/profile-kit-list"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
-import { authApi, authorizedFetch, AuthApiError } from "@/lib/auth"
+import { authApi, authorizedFetch, getAccessToken, AuthApiError } from "@/lib/auth"
 import { absoluteMediaUrl, type ApiKitCatalogItem } from "@/lib/api"
 import { formatCount, type Kit } from "@/lib/data"
 
@@ -47,7 +47,15 @@ export default function ProfilePage() {
   useEffect(() => {
     if (authLoading) return
     if (!user) {
-      router.push("/login")
+      // Если токена в сторадже нет вообще — сразу на /login.
+      // Если токен есть, но user всё ещё null после того как AuthProvider
+      // закончил проверку (authLoading=false) — значит токен невалиден/просрочен,
+      // тоже уходим на /login. Иначе это, скорее всего, гонка сразу после
+      // Google-редиректа, пока AuthProvider ещё не подхватил токен.
+      const token = getAccessToken()
+      if (!token) {
+        router.push("/login")
+      }
       return
     }
 

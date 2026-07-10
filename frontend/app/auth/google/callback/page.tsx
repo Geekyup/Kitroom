@@ -30,7 +30,7 @@ export default function GoogleCallbackPage() {
 
     storeTokens({ access_token: accessToken, refresh_token: refreshToken })
 
-    refreshUser().finally(() => {
+    refreshUser().then(() => {
       router.replace("/profile")
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
