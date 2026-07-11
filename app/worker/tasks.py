@@ -14,6 +14,11 @@ logger = logging.getLogger("kitroom.worker")
 async def process_kit(ctx: dict, kit_id: int) -> None:
     logger.info("kit=%s process_kit СТАРТ", kit_id)
     async with async_session_factory() as db:
+        from sqlalchemy import text
+        diag = await db.execute(text("SELECT current_database(), inet_server_addr()::text, inet_server_port()"))
+        db_name, db_addr, db_port = diag.one()
+        logger.info("kit=%s worker \u0441\u043c\u043e\u0442\u0440\u0438\u0442 \u0432 \u0411\u0414: db=%s addr=%s port=%s", kit_id, db_name, db_addr, db_port)
+
         kit_repo = KitRepository(db)
         node_repo = NodeRepository(db)
 
