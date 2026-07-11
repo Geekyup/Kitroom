@@ -36,6 +36,51 @@ export function clearTokens(): void {
   localStorage.removeItem(REFRESH_TOKEN_KEY)
 }
 
+// Общий промис на "текущий обновление токена" — если несколько запросов
+// словили 401 одновременно, все они должны дождаться ОДНОГО вызова
+// /auth/refresh, а не устроить гонку из параллельных обновлений (второй
+// refresh_token к этому моменту уже был бы отозван первым же вызовом,
+// если на бэкенде реализована ротация с обнаружением повторного использования).
+let refreshInFlight: Promise<TokenPair | null> | null = null
+
+async function refreshAccessToken(): Promise<TokenPair | null> {
+  if (refreshInFlight) return refreshInFlight
+
+  refreshInFlight = (async () => {
+    const refreshToken = getRefreshToken()
+    if (!refreshToken) return null
+
+    try {
+      const res = await fetch(`${API_URL}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+
+      if (!res.ok) {
+        // refresh_token тоже невалиден/истёк/отозван — дальше уже ничего не поделать,
+        // пользователя действительно нужно разлогинить
+        clearTokens()
+        return null
+      }
+
+      const tokens = (await res.json()) as TokenPair
+      storeTokens(tokens)
+      return tokens
+    } catch {
+      // сетевая ошибка при попытке рефреша — не чистим токены,
+      // возможно это временный сбой сети, а не невалидный токен
+      return null
+    }
+  })()
+
+  try {
+    return await refreshInFlight
+  } finally {
+    refreshInFlight = null
+  }
+}
+
 export class AuthApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -45,21 +90,35 @@ export class AuthApiError extends Error {
 }
 
 async function authRequest<T>(path: string, init?: RequestInit, withAuth = false): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    ...(init?.headers as Record<string, string> | undefined),
+  async function doFetch(): Promise<Response> {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      ...(init?.headers as Record<string, string> | undefined),
+    }
+
+    if (init?.body) {
+      headers["Content-Type"] = "application/json"
+    }
+
+    if (withAuth) {
+      const token = getAccessToken()
+      if (token) headers["Authorization"] = `Bearer ${token}`
+    }
+
+    return fetch(`${API_URL}${path}`, { ...init, headers })
   }
 
-  if (init?.body) {
-    headers["Content-Type"] = "application/json"
-  }
+  let res = await doFetch()
 
-  if (withAuth) {
-    const token = getAccessToken()
-    if (token) headers["Authorization"] = `Bearer ${token}`
+  // access token истёк (обычно живёт недолго, см. ACCESS_TOKEN_EXPIRE_MINUTES) —
+  // пробуем один раз обновить его по refresh_token и повторить запрос,
+  // вместо того чтобы сразу разлогинивать пользователя.
+  if (res.status === 401 && withAuth && getRefreshToken()) {
+    const refreshed = await refreshAccessToken()
+    if (refreshed) {
+      res = await doFetch()
+    }
   }
-
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers })
 
   if (!res.ok) {
     let detail = res.statusText
@@ -163,11 +222,24 @@ export const authApi = {
 // Обёртка для авторизованных запросов к остальному API (не auth-эндпоинты),
 // используется для upload/delete кита и списка "моих китов"
 export async function authorizedFetch(path: string, init?: RequestInit): Promise<Response> {
-  const token = getAccessToken()
-  const headers: Record<string, string> = {
-    ...(init?.headers as Record<string, string> | undefined),
-  }
-  if (token) headers["Authorization"] = `Bearer ${token}`
+  async function doFetch(): Promise<Response> {
+    const token = getAccessToken()
+    const headers: Record<string, string> = {
+      ...(init?.headers as Record<string, string> | undefined),
+    }
+    if (token) headers["Authorization"] = `Bearer ${token}`
 
-  return fetch(`${API_URL}${path}`, { ...init, headers })
+    return fetch(`${API_URL}${path}`, { ...init, headers })
+  }
+
+  let res = await doFetch()
+
+  if (res.status === 401 && getRefreshToken()) {
+    const refreshed = await refreshAccessToken()
+    if (refreshed) {
+      res = await doFetch()
+    }
+  }
+
+  return res
 }
