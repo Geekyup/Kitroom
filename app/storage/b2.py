@@ -146,21 +146,50 @@ class B2StorageBackend:
         elapsed = time.monotonic() - t_start
         logger.info("[batch-upload] ЗАВЕРШЕНО %d файлов за %.1fs", total, elapsed)
 
+    async def download_to_file(self, key: str, dest_path: str, timeout_seconds: float = 300) -> int:
+        """
+        Стримит объект из S3 сразу на диск, НЕ накапливая его в памяти.
+
+        Нужен для больших архивов (сотни МБ): get_bytes() держит весь
+        файл в оперативке (плюс временную копию при join чанков) — на
+        контейнере с ограниченной памятью (Railway) это приводило к
+        OOM kill прямо посреди скачивания, без единой ошибки в логах
+        (ядро просто убивает процесс). Запись на диск чанками держит
+        потребление памяти на уровне одного chunk_size вне зависимости
+        от размера файла.
+
+        Возвращает количество записанных байт.
+        """
+        async def _download() -> int:
+            written = 0
+            async with self._get_client() as client:
+                response = await client.get_object(Bucket=self.bucket, Key=key)
+                with open(dest_path, "wb") as f:
+                    async for chunk in response["Body"].iter_chunks(chunk_size=1024 * 1024):
+                        f.write(chunk)
+                        written += len(chunk)
+            return written
+
+        try:
+            return await asyncio.wait_for(_download(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.error(
+                "download_to_file: скачивание %s не уложилось в %.0fs — обрыв/слишком медленный канал",
+                key, timeout_seconds,
+            )
+            raise
+
     async def get_bytes(self, key: str, timeout_seconds: float = 300) -> bytes:
         """
-        Используется ArchiveService, чтобы скачать zip перед распаковкой.
+        Используется для НЕБОЛЬШИХ объектов (обложки, аватары и т.п.).
+        Для больших архивов используй download_to_file — здесь файл
+        всё ещё целиком попадает в память.
 
-        ВАЖНО: читаем поток ЧАНКАМИ через iter_chunks(), а не одним
-        await response["Body"].read(). На больших файлах (сотни МБ) и
-        нестабильном/медленном канале (например международный линк до
-        Cloud.ru) один большой read() может зависнуть без ошибки на
-        много минут или навсегда — botocore's read_timeout считается
+        Читаем поток ЧАНКАМИ через iter_chunks(), а не одним
+        await response["Body"].read(). botocore's read_timeout считается
         между чанками (idle timeout), а не на всю операцию, так что
-        read() его не соблюдает как общий дедлайн.
-
-        Оборачиваем всю операцию в asyncio.wait_for с общим таймаутом —
-        это даёт гарантированный верхний предел и явное исключение
-        вместо тихого зависания задачи.
+        read() его не соблюдает как общий дедлайн — оборачиваем всё в
+        asyncio.wait_for с общим таймаутом.
         """
         async def _download() -> bytes:
             async with self._get_client() as client:

@@ -1,4 +1,5 @@
 import logging
+import tempfile
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -27,28 +28,35 @@ class ArchiveService:
         self.storage = storage or B2StorageBackend()
 
     async def extract_and_validate(self, zip_key: str, kit_id: int) -> list[DrumKitNode]:
-        logger.info("kit=%s скачивание архива %s из B2", kit_id, zip_key)
-        zip_bytes = await self.storage.get_bytes(zip_key)
-        logger.info("kit=%s архив скачан (%d bytes)", kit_id, len(zip_bytes))
-        buffer = BytesIO(zip_bytes)
+        # Скачиваем архив НА ДИСК, а не в память — киты могут весить
+        # сотни МБ, и удержание всего файла в памяти (плюс временная
+        # копия при сборке из чанков) на контейнере с ограниченной
+        # памятью приводило к OOM kill прямо посреди скачивания, без
+        # единой ошибки в логах (ядро просто убивает процесс).
+        with tempfile.TemporaryDirectory(prefix=f"kit-{kit_id}-") as tmp_dir:
+            zip_path = Path(tmp_dir) / "archive.zip"
 
-        if not zipfile.is_zipfile(buffer):
-            raise InvalidArchive("File is not a valid zip archive")
+            logger.info("kit=%s скачивание архива %s из B2 на диск", kit_id, zip_key)
+            size = await self.storage.download_to_file(zip_key, str(zip_path))
+            logger.info("kit=%s архив скачан (%d bytes)", kit_id, size)
 
-        extract_prefix = f"kits/{kit_id}/extracted"
+            if not zipfile.is_zipfile(zip_path):
+                raise InvalidArchive("File is not a valid zip archive")
 
-        with zipfile.ZipFile(buffer) as zf:
-            infos = [i for i in zf.infolist() if not i.filename.replace("\\", "/").endswith("/")]
+            extract_prefix = f"kits/{kit_id}/extracted"
 
-            if len(infos) > settings.MAX_FILES_PER_KIT:
-                raise TooManyFilesInArchive()
+            with zipfile.ZipFile(zip_path) as zf:
+                infos = [i for i in zf.infolist() if not i.filename.replace("\\", "/").endswith("/")]
 
-            for info in infos:
-                self._assert_safe_path(info.filename)
+                if len(infos) > settings.MAX_FILES_PER_KIT:
+                    raise TooManyFilesInArchive()
 
-            folder_paths = self._collect_folder_paths(zf.namelist())
-            logger.info("kit=%s найдено %d файлов, %d папок", kit_id, len(infos), len(folder_paths))
-            nodes = await self._build_nodes(kit_id, infos, folder_paths, zf, extract_prefix)
+                for info in infos:
+                    self._assert_safe_path(info.filename)
+
+                folder_paths = self._collect_folder_paths(zf.namelist())
+                logger.info("kit=%s найдено %d файлов, %d папок", kit_id, len(infos), len(folder_paths))
+                nodes = await self._build_nodes(kit_id, infos, folder_paths, zf, extract_prefix)
 
         if not nodes:
             raise InvalidArchive("Archive is empty")
