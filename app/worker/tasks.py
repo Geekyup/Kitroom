@@ -1,3 +1,5 @@
+import logging
+
 from app.db.models.drum_kit import KitStatus
 from app.db.models.drum_kit_node import NodeType
 from app.db.session import async_session_factory
@@ -6,14 +8,19 @@ from app.repositories.node_repository import NodeRepository
 from app.services.archive_service import ArchiveService
 from app.core.exceptions import AppException
 
+logger = logging.getLogger("kitroom.worker")
+
 
 async def process_kit(ctx: dict, kit_id: int) -> None:
+    logger.info("kit=%s process_kit СТАРТ", kit_id)
     async with async_session_factory() as db:
         kit_repo = KitRepository(db)
         node_repo = NodeRepository(db)
 
         kit = await kit_repo.get_by_id(kit_id)
+        logger.info("kit=%s найден в БД, original_zip_path=%s", kit_id, kit.original_zip_path)
         await kit_repo.update_status(kit_id, KitStatus.PROCESSING)
+        logger.info("kit=%s статус -> PROCESSING", kit_id)
 
         try:
             # Чистим ноды от возможной предыдущей незавершённой попытки —
