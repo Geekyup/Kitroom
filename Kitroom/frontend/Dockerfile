@@ -1,0 +1,39 @@
+# --- deps: ставим зависимости отдельным слоем для кэша ---
+FROM node:22-slim AS deps
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm config set fetch-retries 5 \
+    && pnpm config set fetch-retry-mintimeout 20000 \
+    && pnpm config set fetch-retry-maxtimeout 120000 \
+    && pnpm config set network-concurrency 4 \
+    && for i in 1 2 3; do pnpm install --no-frozen-lockfile && break || sleep 10; done
+
+# --- builder: собираем production-бандл ---
+FROM node:22-slim AS builder
+WORKDIR /app
+RUN corepack enable
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+RUN pnpm build
+
+# --- runner: минимальный образ только с рантаймом ---
+FROM node:22-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
+
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+CMD ["node", "server.js"]

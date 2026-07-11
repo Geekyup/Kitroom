@@ -1,6 +1,6 @@
 from arq.connections import RedisSettings
 
-import app.db.models  # noqa: F401 — регистрирует все модели в реестре SQLAlchemy
+import app.db.models  
 from app.core.config import settings
 from app.worker.tasks import process_kit
 

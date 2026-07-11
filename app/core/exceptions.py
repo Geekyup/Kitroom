@@ -119,3 +119,8 @@ class NotKitOwner(AppException):
 class SamePassword(AppException):
     status_code = 400
     detail = "New password must be different from the current password"
+
+
+class UploadNotFound(AppException):
+    status_code = 404
+    detail = "Файл не найден в хранилище — аплоад не завершён или ключ неверный"

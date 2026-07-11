@@ -1,19 +1,23 @@
 import re
 import uuid
-from pathlib import Path
 
 from arq.connections import ArqRedis
+from botocore.exceptions import ClientError
 from fastapi import UploadFile
 
 from app.core.config import settings
-from app.core.exceptions import ArchiveTooLarge, KitNotReady, NotKitOwner
+from app.core.exceptions import ArchiveTooLarge, KitNotReady, NotKitOwner, UploadNotFound
 from app.db.models.drum_kit import DrumKit, KitStatus
 from app.db.models.drum_kit_node import DrumKitNode
 from app.repositories.kit_repository import KitRepository
 from app.repositories.node_repository import NodeRepository
-from app.schemas.kit import KitCatalogItemOut, KitOut
+from app.schemas.kit import (
+    KitCatalogItemOut,
+    KitOut,
+    KitUploadInitOut,
+)
 from app.schemas.node import NodeOut
-from app.storage.local import LocalStorageBackend
+from app.storage.b2 import B2StorageBackend
 
 
 class KitService:
@@ -21,7 +25,7 @@ class KitService:
         self,
         kit_repo: KitRepository,
         node_repo: NodeRepository,
-        storage: LocalStorageBackend,
+        storage: B2StorageBackend,
         arq_pool: ArqRedis,
     ):
         self.kit_repo = kit_repo
@@ -29,6 +33,11 @@ class KitService:
         self.storage = storage
         self.arq_pool = arq_pool
 
+    # ------------------------------------------------------------------
+    # Старый флоу — файл идёт через сервер (multipart). Оставлен для
+    # обратной совместимости / как fallback, если presigned недоступен
+    # (например, старый фронт, мобильные клиенты без прямого доступа к S3).
+    # ------------------------------------------------------------------
     async def create_kit(
         self,
         owner_id: int,
@@ -63,6 +72,103 @@ class KitService:
         await self.arq_pool.enqueue_job("process_kit", kit.id)
         return kit
 
+    # ------------------------------------------------------------------
+    # Новый флоу — presigned PUT. Файл льётся напрямую браузер -> S3,
+    # сервер в передаче байтов не участвует вообще.
+    #
+    #   1. init_kit_upload:    создаёт DrumKit(status=PENDING) с уже
+    #                          известным object_key, возвращает presigned
+    #                          PUT URL. Файл ещё не загружен.
+    #   2. (клиент делает PUT presigned_url напрямую в S3)
+    #   3. confirm_kit_upload: проверяет через head_object, что файл
+    #                          реально долетел, обновляет size_bytes из
+    #                          реальных метаданных S3 (не доверяем клиенту)
+    #                          и только тогда ставит job в очередь.
+    # ------------------------------------------------------------------
+    async def init_kit_upload(
+        self,
+        owner_id: int,
+        title: str,
+        genre: str,
+        tags: list[str],
+        description: str | None,
+        content_type: str = "application/zip",
+    ) -> KitUploadInitOut:
+        object_key = self.storage.generate_upload_key()
+        slug = self._generate_slug(title)
+
+        kit = await self.kit_repo.create(
+            owner_id=owner_id,
+            title=title,
+            slug=slug,
+            original_zip_path=object_key,
+            size_bytes=0,
+            genre=genre,
+            tags=tags,
+            description=description,
+        )
+
+        upload_url = await self.storage.get_upload_url(
+            key=object_key,
+            content_type=content_type,
+            expires_in=3600,
+        )
+
+        return KitUploadInitOut(
+            kit_id=kit.id,
+            slug=kit.slug,
+            upload_url=upload_url,
+            object_key=object_key,
+        )
+
+    async def confirm_kit_upload(self, kit_id: int, requester_id: int) -> DrumKit:
+        kit = await self.kit_repo.get_by_id(kit_id)
+
+        if kit.owner_id != requester_id:
+            raise NotKitOwner()
+
+        try:
+            meta = await self.storage.head_object(kit.original_zip_path)
+        except ClientError:
+            raise UploadNotFound()
+
+        size_bytes = meta.get("ContentLength", 0)
+        if size_bytes > settings.MAX_ZIP_SIZE_MB * 1024 * 1024:
+            await self.storage.delete_async(kit.original_zip_path)
+            await self.kit_repo.mark_failed(kit.id, "Файл превышает максимальный размер")
+            raise ArchiveTooLarge()
+
+        await self.kit_repo.update_size(kit.id, size_bytes)
+        await self.arq_pool.enqueue_job("process_kit", kit.id)
+
+        return await self.kit_repo.get_by_id(kit.id)
+
+    async def init_cover_upload(self, kit_id: int, requester_id: int, content_type: str = "image/jpeg"):
+        """Presigned PUT для обложки — та же логика, отдельно от zip'а."""
+        kit = await self.kit_repo.get_by_id(kit_id)
+        if kit.owner_id != requester_id:
+            raise NotKitOwner()
+
+        extension = ".jpg" if "jpeg" in content_type else "." + content_type.split("/")[-1]
+        object_key = f"kits/{kit_id}/cover{extension}"
+
+        upload_url = await self.storage.get_upload_url(
+            key=object_key, content_type=content_type, expires_in=3600
+        )
+        return object_key, upload_url
+
+    async def confirm_cover_upload(self, kit_id: int, requester_id: int, object_key: str) -> None:
+        kit = await self.kit_repo.get_by_id(kit_id)
+        if kit.owner_id != requester_id:
+            raise NotKitOwner()
+
+        try:
+            await self.storage.head_object(object_key)
+        except ClientError:
+            raise UploadNotFound()
+
+        await self.kit_repo.update_cover(kit.id, object_key)
+
     async def get_kit_status(self, slug: str) -> DrumKit:
         return await self.kit_repo.get_by_slug(slug)
 
@@ -70,7 +176,7 @@ class KitService:
         kit = await self.kit_repo.get_by_slug(slug)
         out = KitOut.model_validate(kit)
         if kit.cover_path:
-            out.cover_path = self._build_static_url(kit.cover_path)
+            out.cover_path = await self.storage.get_url(kit.cover_path)
         return out
 
     async def get_kit_tree(self, slug: str) -> tuple[DrumKit, list[NodeOut]]:
@@ -80,7 +186,7 @@ class KitService:
             raise KitNotReady()
 
         flat_nodes = await self.node_repo.get_flat_nodes(kit.id)
-        tree = self._build_tree(flat_nodes)
+        tree = await self._build_tree(flat_nodes)
         return kit, tree
 
     async def get_kit_for_download(self, slug: str) -> DrumKit:
@@ -102,7 +208,7 @@ class KitService:
                 author=kit.owner.username,
                 genre=kit.genre,
                 tags=kit.tags,
-                cover_path=self._build_static_url(kit.cover_path) if kit.cover_path else None,
+                cover_path=await self.storage.get_url(kit.cover_path) if kit.cover_path else None,
                 sound_count=kit.sound_count,
                 downloads_count=kit.downloads_count,
                 size_bytes=kit.size_bytes,
@@ -122,7 +228,7 @@ class KitService:
                 author=kit.owner.username,
                 genre=kit.genre,
                 tags=kit.tags,
-                cover_path=self._build_static_url(kit.cover_path) if kit.cover_path else None,
+                cover_path=await self.storage.get_url(kit.cover_path) if kit.cover_path else None,
                 sound_count=kit.sound_count,
                 downloads_count=kit.downloads_count,
                 size_bytes=kit.size_bytes,
@@ -155,7 +261,7 @@ class KitService:
         )
         out = KitOut.model_validate(updated)
         if updated.cover_path:
-            out.cover_path = self._build_static_url(updated.cover_path)
+            out.cover_path = await self.storage.get_url(updated.cover_path)
         return out
 
     async def delete_kit(self, slug: str, requester_id: int) -> None:
@@ -164,21 +270,22 @@ class KitService:
         if kit.owner_id != requester_id:
             raise NotKitOwner()
 
-        self.storage.delete(kit.original_zip_path)
+        await self.storage.delete_async(kit.original_zip_path)
+        await self.storage.delete_prefix(f"kits/{kit.id}/")
         await self.kit_repo.delete(kit.id)
 
     def _generate_slug(self, title: str) -> str:
         base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
         return f"{base}-{uuid.uuid4().hex[:8]}"
 
-    def _build_tree(self, nodes: list[DrumKitNode]) -> list[NodeOut]:
+    async def _build_tree(self, nodes: list[DrumKitNode]) -> list[NodeOut]:
         by_id: dict[int, NodeOut] = {}
         for n in nodes:
-            # model_validate(n) makes pydantic read n.children off the ORM
-            # object (from_attributes=True touches every NodeOut field,
-            # including children), which lazy-loads outside an async-safe
-            # context -> MissingGreenlet. Build explicitly from columns
-            # instead and fill children ourselves from the flat list below.
+            sound_url = (
+                await self.storage.get_url(n.storage_path)
+                if n.storage_path is not None
+                else None
+            )
             out = NodeOut(
                 id=n.id,
                 name=n.name,
@@ -186,7 +293,7 @@ class KitService:
                 file_format=n.file_format,
                 duration_ms=n.duration_ms,
                 order_index=n.order_index,
-                sound_url=self._build_static_url(n.storage_path) if n.storage_path is not None else None,
+                sound_url=sound_url,
                 children=[],
             )
             by_id[n.id] = out
@@ -200,11 +307,3 @@ class KitService:
                 by_id[node.parent_id].children.append(out)
 
         return roots
-
-    def _build_static_url(self, storage_path: str) -> str:
-        """
-        Превращает абсолютный путь в PUBLIC_STORAGE_ROOT в публичный URL,
-        резолвящийся через /static mount в main.py.
-        """
-        relative = Path(storage_path).relative_to(Path(settings.PUBLIC_STORAGE_ROOT))
-        return f"/static/{relative.as_posix()}"

@@ -61,3 +61,16 @@ class KitCatalogItemOut(BaseModel):
     size_bytes: int
     status: KitStatus
     error_message: str | None
+
+
+class KitUploadInitOut(BaseModel):
+    """
+    Ответ на POST /kits/upload-url — старт presigned-флоу.
+    Кит уже создан в БД (status=PENDING), файл ещё не загружен.
+    Клиент должен PUT'ить файл на upload_url напрямую в S3,
+    затем вызвать POST /kits/{kit_id}/confirm-upload.
+    """
+    kit_id: int
+    slug: str
+    upload_url: str
+    object_key: str

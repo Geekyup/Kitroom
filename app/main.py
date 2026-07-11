@@ -1,12 +1,12 @@
 from contextlib import asynccontextmanager
-from pathlib import Path
+
+import logging
 
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 import app.db.models  # noqa: F401 — регистрирует все модели в реестре SQLAlchemy
@@ -24,6 +24,8 @@ async def lifespan(app: FastAPI):
     yield
     await app.state.arq_pool.close()
 
+logging.getLogger("botocore").setLevel(logging.DEBUG)
+logging.getLogger("aiobotocore").setLevel(logging.DEBUG)
 
 app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 
@@ -41,10 +43,6 @@ app.add_middleware(
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-
-Path(settings.PUBLIC_STORAGE_ROOT).mkdir(parents=True, exist_ok=True)
-Path(settings.UPLOADS_STORAGE_ROOT).mkdir(parents=True, exist_ok=True)
-app.mount("/static", StaticFiles(directory=settings.PUBLIC_STORAGE_ROOT), name="static")
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(kits_router, prefix="/api/v1")
