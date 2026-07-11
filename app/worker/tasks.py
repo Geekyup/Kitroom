@@ -16,6 +16,10 @@ async def process_kit(ctx: dict, kit_id: int) -> None:
         await kit_repo.update_status(kit_id, KitStatus.PROCESSING)
 
         try:
+            # Чистим ноды от возможной предыдущей незавершённой попытки —
+            # делает ретрай (arq max_tries) идемпотентным.
+            await node_repo.delete_by_kit(kit_id)
+
             archive_service = ArchiveService()
             nodes = await archive_service.extract_and_validate(
                 zip_key=kit.original_zip_path,
@@ -29,7 +33,18 @@ async def process_kit(ctx: dict, kit_id: int) -> None:
             await kit_repo.update_status(kit_id, KitStatus.READY)
 
         except AppException as e:
-            await kit_repo.update_status(kit_id, KitStatus.FAILED, error_message=e.detail)
+            try:
+                await kit_repo.update_status(kit_id, KitStatus.FAILED, error_message=e.detail)
+            except Exception:
+                # Если и запись статуса FAILED не проходит (например БД
+                # всё ещё недоступна) — не глушим ошибку молча, пусть
+                # arq увидит краш и сам ретраит по своей политике.
+                raise
 
         except Exception as e:
-            await kit_repo.update_status(kit_id, KitStatus.FAILED, error_message=f"Unexpected error: {e}")
+            try:
+                await kit_repo.update_status(
+                    kit_id, KitStatus.FAILED, error_message=f"Unexpected error: {e}"
+                )
+            except Exception:
+                raise

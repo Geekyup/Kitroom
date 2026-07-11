@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.drum_kit_node import DrumKitNode
@@ -7,6 +7,17 @@ from app.db.models.drum_kit_node import DrumKitNode
 class NodeRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def delete_by_kit(self, kit_id: int) -> None:
+        """
+        Удаляет все ноды кита перед (ре)обработкой — делает process_kit
+        идемпотентным на ретраях arq: если предыдущая попытка успела
+        частично закоммитить ноды перед тем как задача зависла/упала
+        (например при обрыве соединения к БД), повторный bulk_insert
+        не словит дубликаты/ошибку уникальности.
+        """
+        await self.db.execute(delete(DrumKitNode).where(DrumKitNode.kit_id == kit_id))
+        await self.db.commit()
 
     async def bulk_insert(self, nodes: list[DrumKitNode]) -> None:
         self.db.add_all(nodes)
