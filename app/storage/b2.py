@@ -146,11 +146,38 @@ class B2StorageBackend:
         elapsed = time.monotonic() - t_start
         logger.info("[batch-upload] ЗАВЕРШЕНО %d файлов за %.1fs", total, elapsed)
 
-    async def get_bytes(self, key: str) -> bytes:
-        """Используется ArchiveService, чтобы скачать zip перед распаковкой."""
-        async with self._get_client() as client:
-            response = await client.get_object(Bucket=self.bucket, Key=key)
-            return await response["Body"].read()
+    async def get_bytes(self, key: str, timeout_seconds: float = 300) -> bytes:
+        """
+        Используется ArchiveService, чтобы скачать zip перед распаковкой.
+
+        ВАЖНО: читаем поток ЧАНКАМИ через iter_chunks(), а не одним
+        await response["Body"].read(). На больших файлах (сотни МБ) и
+        нестабильном/медленном канале (например международный линк до
+        Cloud.ru) один большой read() может зависнуть без ошибки на
+        много минут или навсегда — botocore's read_timeout считается
+        между чанками (idle timeout), а не на всю операцию, так что
+        read() его не соблюдает как общий дедлайн.
+
+        Оборачиваем всю операцию в asyncio.wait_for с общим таймаутом —
+        это даёт гарантированный верхний предел и явное исключение
+        вместо тихого зависания задачи.
+        """
+        async def _download() -> bytes:
+            async with self._get_client() as client:
+                response = await client.get_object(Bucket=self.bucket, Key=key)
+                chunks: list[bytes] = []
+                async for chunk in response["Body"].iter_chunks(chunk_size=1024 * 1024):
+                    chunks.append(chunk)
+                return b"".join(chunks)
+
+        try:
+            return await asyncio.wait_for(_download(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.error(
+                "get_bytes: скачивание %s не уложилось в %.0fs — обрыв/слишком медленный канал",
+                key, timeout_seconds,
+            )
+            raise
 
     async def get_url(self, key: str, expires_in: int = 3600) -> str:
         """Presigned URL — замена /static/... для приватного бакета."""
