@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { GENRES } from "@/lib/data"
 import { authorizedFetch } from "@/lib/auth"
 
-type Stage = "idle" | "uploading" | "done" | "error"
+type Stage = "idle" | "creating" | "uploading" | "confirming" | "done" | "error"
 
 export function UploadForm() {
   const router = useRouter()
@@ -17,6 +17,7 @@ export function UploadForm() {
   const [cover, setCover] = useState<File | null>(null)
   const [stage, setStage] = useState<Stage>("idle")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
 
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
@@ -29,6 +30,38 @@ export function UploadForm() {
   function handleFiles(files: FileList | null) {
     const f = files?.[0]
     if (f) setFile(f)
+  }
+
+  /**
+   * PUT файла напрямую в S3 (Railway Bucket) с прогрессом через XHR.
+   * fetch() не отдаёт upload progress, поэтому для прогресс-бара нужен XHR.
+   */
+  function putToStorage(url: string, body: File, onProgress: (pct: number) => void): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open("PUT", url, true)
+      xhr.setRequestHeader("Content-Type", body.type || "application/octet-stream")
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          onProgress(Math.round((event.loaded / event.total) * 100))
+        }
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          onProgress(100)
+          resolve()
+        } else {
+          reject(new Error(`Хранилище вернуло ошибку: ${xhr.status}`))
+        }
+      }
+
+      xhr.onerror = () => reject(new Error("Сетевая ошибка при загрузке файла в хранилище"))
+      xhr.onabort = () => reject(new Error("Загрузка отменена"))
+
+      xhr.send(body)
+    })
   }
 
   async function startUpload(e: React.FormEvent) {
@@ -44,26 +77,73 @@ export function UploadForm() {
       return
     }
 
-    setStage("uploading")
-
-    const formData = new FormData()
-    formData.append("title", title)
-    formData.append("genre", genre)
-    formData.append("tags", tags)
-    formData.append("description", description)
-    formData.append("file", file)
-    if (cover) formData.append("cover", cover)
+    setProgress(0)
 
     try {
-      const res = await authorizedFetch("/api/v1/kits", {
+      // Шаг 1 — создаём кит в БД (status=pending) и получаем presigned URL.
+      // Файл ещё не загружен, сервер тут почти не тратит времени.
+      setStage("creating")
+      const initRes = await authorizedFetch("/api/v1/kits/upload-url", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          genre,
+          tags,
+          description,
+          content_type: file.type || "application/zip",
+        }),
       })
 
-      if (!res.ok) {
-        let detail = res.statusText
+      if (!initRes.ok) {
+        let detail = initRes.statusText
         try {
-          const body = await res.json()
+          const body = await initRes.json()
+          detail = body.detail ?? detail
+        } catch {
+          // тело не JSON
+        }
+        throw new Error(detail)
+      }
+
+      const { kit_id, upload_url } = await initRes.json()
+
+      // Шаг 2 — грузим файл НАПРЯМУЮ в S3, минуя наш сервер целиком.
+      // Именно это убирает зависания через Docker/сервер на больших файлах.
+      setStage("uploading")
+      await putToStorage(upload_url, file, setProgress)
+
+      // Шаг 2.5 — если есть обложка, грузим её тем же способом.
+      if (cover) {
+        const coverInitRes = await authorizedFetch(
+          `/api/v1/kits/${kit_id}/cover-upload-url?content_type=${encodeURIComponent(
+            cover.type || "image/jpeg"
+          )}`,
+          { method: "POST" }
+        )
+        if (coverInitRes.ok) {
+          const { upload_url: coverUploadUrl, object_key } = await coverInitRes.json()
+          await putToStorage(coverUploadUrl, cover, () => {})
+          await authorizedFetch(`/api/v1/kits/${kit_id}/cover-confirm-upload`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ object_key }),
+          })
+        }
+        // Если обложка не загрузилась — не блокируем публикацию кита из-за неё.
+      }
+
+      // Шаг 3 — подтверждаем: сервер проверит через head_object, что файл
+      // реально долетел, и только тогда поставит job в очередь на распаковку.
+      setStage("confirming")
+      const confirmRes = await authorizedFetch(`/api/v1/kits/${kit_id}/confirm-upload`, {
+        method: "POST",
+      })
+
+      if (!confirmRes.ok) {
+        let detail = confirmRes.statusText
+        try {
+          const body = await confirmRes.json()
           detail = body.detail ?? detail
         } catch {
           // тело не JSON
@@ -86,12 +166,21 @@ export function UploadForm() {
     setTags("")
     setStage("idle")
     setErrorMessage(null)
+    setProgress(0)
   }
 
   const formatSize = (bytes: number) =>
     bytes > 1024 * 1024
       ? `${(bytes / 1024 / 1024).toFixed(1)} МБ`
       : `${Math.max(1, Math.round(bytes / 1024))} КБ`
+
+  const isBusy = stage === "creating" || stage === "uploading" || stage === "confirming"
+
+  const stageLabel: Record<string, string> = {
+    creating: "Создаём кит…",
+    uploading: `Загружаем файл в хранилище… ${progress}%`,
+    confirming: "Проверяем загрузку и ставим в очередь…",
+  }
 
   if (stage === "done") {
     return (
@@ -190,12 +279,20 @@ export function UploadForm() {
           )}
         </div>
 
-        {stage === "uploading" && (
+        {isBusy && (
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="flex items-center gap-2 text-sm font-medium">
               <span className="size-2 animate-pulse rounded-full bg-primary" />
-              Загружаем и ставим в очередь на обработку…
+              {stageLabel[stage]}
             </div>
+            {stage === "uploading" && (
+              <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-150"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -274,8 +371,8 @@ export function UploadForm() {
           </label>
         </Field>
 
-        <Button type="submit" size="lg" className="mt-1 h-12 text-base" disabled={stage === "uploading"}>
-          {stage === "uploading" ? "Загрузка…" : "Опубликовать кит"}
+        <Button type="submit" size="lg" className="mt-1 h-12 text-base" disabled={isBusy}>
+          {isBusy ? "Загрузка…" : "Опубликовать кит"}
         </Button>
       </div>
     </form>
