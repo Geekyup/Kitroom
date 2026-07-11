@@ -1,3 +1,4 @@
+import logging
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +11,8 @@ from app.core.exceptions import (
 )
 from app.db.models.drum_kit_node import DrumKitNode, NodeType
 from app.storage.b2 import B2StorageBackend
+
+logger = logging.getLogger("kitroom.archive")
 
 
 class ArchiveService:
@@ -24,7 +27,9 @@ class ArchiveService:
         self.storage = storage or B2StorageBackend()
 
     async def extract_and_validate(self, zip_key: str, kit_id: int) -> list[DrumKitNode]:
+        logger.info("kit=%s скачивание архива %s из B2", kit_id, zip_key)
         zip_bytes = await self.storage.get_bytes(zip_key)
+        logger.info("kit=%s архив скачан (%d bytes)", kit_id, len(zip_bytes))
         buffer = BytesIO(zip_bytes)
 
         if not zipfile.is_zipfile(buffer):
@@ -42,11 +47,13 @@ class ArchiveService:
                 self._assert_safe_path(info.filename)
 
             folder_paths = self._collect_folder_paths(zf.namelist())
+            logger.info("kit=%s найдено %d файлов, %d папок", kit_id, len(infos), len(folder_paths))
             nodes = await self._build_nodes(kit_id, infos, folder_paths, zf, extract_prefix)
 
         if not nodes:
             raise InvalidArchive("Archive is empty")
 
+        logger.info("kit=%s обработка завершена, %d нод создано", kit_id, len(nodes))
         return nodes
 
     def _assert_safe_path(self, filename: str) -> None:
@@ -92,6 +99,16 @@ class ArchiveService:
             nodes_by_path[folder] = node
             order += 1
 
+        # Сначала читаем все аудиофайлы из zip и готовим метаданные,
+        # НЕ трогая сеть — чтение из zip быстрое (данные уже в памяти).
+        # Загрузку в B2 делаем одним батчем через save_many_bytes ниже:
+        # раньше здесь на каждый файл вызывался save_bytes, который
+        # открывал новое TCP/TLS соединение — на архивах с десятками
+        # и сотнями файлов это давало огромные накладные расходы на
+        # handshake и растягивало обработку кита на много минут.
+        upload_items: list[tuple[bytes, str, str]] = []
+        file_meta: list[tuple[str, list[str], str | None, str, str, bytes]] = []
+
         for info in infos:
             rel_path = info.filename.replace("\\", "/")
             parts = rel_path.split("/")
@@ -106,8 +123,15 @@ class ArchiveService:
 
             object_key = f"{extract_prefix}/{rel_path}"
             content_type = self._content_type_for(extension)
-            await self.storage.save_bytes(data, object_key, content_type=content_type)
 
+            upload_items.append((data, object_key, content_type))
+            file_meta.append((rel_path, parts, parent_path, extension, object_key, data))
+
+        logger.info("kit=%s загрузка %d аудиофайлов в B2 (batch)", kit_id, len(upload_items))
+        await self.storage.save_many_bytes(upload_items)
+        logger.info("kit=%s все аудиофайлы загружены", kit_id)
+
+        for rel_path, parts, parent_path, extension, object_key, data in file_meta:
             duration_ms = self._read_duration_ms(data)
 
             node = DrumKitNode(

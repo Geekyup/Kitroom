@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import uuid
@@ -41,9 +42,12 @@ class B2StorageBackend:
                 s3={"addressing_style": "path"},
                 # Явные таймауты — иначе зависший коннект молча ждёт минутами
                 # вместо быстрого фейла с понятной ошибкой.
+                # read_timeout уменьшен с 120 до 30: extracted-файлы (сэмплы)
+                # обычно небольшие, 120s на попытку с 5 retries давали до 10
+                # минут ожидания на одном подвисшем файле.
                 connect_timeout=10,
-                read_timeout=120,
-                retries={"max_attempts": 5, "mode": "standard"},
+                read_timeout=30,
+                retries={"max_attempts": 3, "mode": "standard"},
                 max_pool_connections=20,
             ),
         )
@@ -56,6 +60,10 @@ class B2StorageBackend:
         self._multipart_threshold = 16 * 1024 * 1024  # 16MB
         self._multipart_chunksize = 8 * 1024 * 1024  # 8MB вместо 16MB
         self._multipart_concurrency = 4  # 4 вместо 8 — меньше шанс упереться в обрыв
+
+        # Параллелизм для batch-загрузки множества мелких файлов
+        # (extracted-сэмплы кита) в рамках одного переиспользуемого клиента.
+        self._batch_concurrency = 8
 
     def _get_client(self):
         return self._session.client("s3", **self._client_kwargs)
@@ -79,7 +87,7 @@ class B2StorageBackend:
         return key
 
     async def save_bytes(self, data: bytes, key: str, content_type: str | None = None) -> str:
-        """Используется ArchiveService для загрузки распакованных звуков."""
+        """Используется для одиночной загрузки (одна операция — один клиент)."""
         async with self._get_client() as client:
             await client.put_object(
                 Bucket=self.bucket,
@@ -88,6 +96,55 @@ class B2StorageBackend:
                 ContentType=content_type or "application/octet-stream",
             )
         return key
+
+    async def save_many_bytes(
+        self,
+        items: list[tuple[bytes, str, str | None]],
+        concurrency: int | None = None,
+    ) -> None:
+        """
+        Батч-загрузка множества файлов через ОДИН переиспользуемый клиент
+        с ограниченным параллелизмом.
+
+        Используется ArchiveService для заливки всех extracted-сэмплов кита
+        разом — вместо создания нового TCP/TLS соединения на каждый файл
+        (как было раньше при последовательных save_bytes в цикле), что на
+        архивах с десятками-сотнями файлов давало огромные накладные расходы
+        на handshake и суммарно растягивало обработку на много минут.
+
+        items: список (data, key, content_type)
+        """
+        if not items:
+            return
+
+        sem = asyncio.Semaphore(concurrency or self._batch_concurrency)
+        total = len(items)
+        completed = 0
+        t_start = time.monotonic()
+
+        async with self._get_client() as client:
+
+            async def _put(data: bytes, key: str, content_type: str | None) -> None:
+                nonlocal completed
+                async with sem:
+                    await client.put_object(
+                        Bucket=self.bucket,
+                        Key=key,
+                        Body=data,
+                        ContentType=content_type or "application/octet-stream",
+                    )
+                    completed += 1
+                    if completed % 10 == 0 or completed == total:
+                        elapsed = time.monotonic() - t_start
+                        logger.info(
+                            "[batch-upload] %d/%d файлов загружено за %.1fs",
+                            completed, total, elapsed,
+                        )
+
+            await asyncio.gather(*[_put(d, k, c) for d, k, c in items])
+
+        elapsed = time.monotonic() - t_start
+        logger.info("[batch-upload] ЗАВЕРШЕНО %d файлов за %.1fs", total, elapsed)
 
     async def get_bytes(self, key: str) -> bytes:
         """Используется ArchiveService, чтобы скачать zip перед распаковкой."""

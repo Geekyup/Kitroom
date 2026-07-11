@@ -73,8 +73,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function absoluteMediaUrl(path: string): string {
-  // sound_url/cover_path приходят как относительные пути вида "/static/kits/3/..."
-  // на бэкенде :8000, а не на фронте :3000 — собираем полный URL.
+  // sound_url/cover_path могут приходить двумя видами:
+  // 1) относительный путь вида "/static/kits/3/..." — старый локальный storage backend,
+  //    нужно склеить с публичным адресом бэкенда.
+  // 2) уже АБСОЛЮТНЫЙ presigned URL от S3-совместимого хранилища (B2/Cloud.ru) —
+  //    начинается с http(s):// и содержит подпись запроса (X-Amz-Signature и т.д.).
+  //    Такой URL трогать нельзя: конкатенация с PUBLIC_API_URL превращает его
+  //    в невалидный адрес вида "http://localhost:8000https://s3.../..." и
+  //    <audio>/<img> тихо перестают грузиться.
+  if (/^https?:\/\//i.test(path)) {
+    return path
+  }
+
   // ВАЖНО: этот URL всегда попадёт в <img>/<audio> в БРАУЗЕРЕ, даже если функция
   // вызвана на сервере (SSR) — поэтому всегда берём публичный адрес,
   // а не внутренний docker-хостнейм (API_URL), иначе картинки/звук будут биты.
