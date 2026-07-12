@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ArrowRight, Upload, AudioLines, Play, Layers } from "lucide-react"
+import { ArrowRight, Upload } from "lucide-react"
 import { SiteHeader } from "@/components/site-header"
 import { KitExplorer } from "@/components/kit-explorer"
 import { Button } from "@/components/ui/button"
@@ -64,12 +64,6 @@ export default async function HomePage() {
               </Button>
             </div>
           </div>
-
-          <div className="mx-auto mt-12 grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
-            <Feature icon={<Play className="size-5" />} title="Превью в один клик" text="Слушайте любой сэмпл прямо в списке." />
-            <Feature icon={<Layers className="size-5" />} title="Дерево папок" text="Kicks, Snares, Hats — всё по полочкам." />
-            <Feature icon={<AudioLines className="size-5" />} title="Скачивание ZIP" text="Забирайте весь кит одним архивом." />
-          </div>
         </section>
 
         {/* Catalog */}
@@ -94,26 +88,6 @@ export default async function HomePage() {
         </section>
       </main>
 
-    </div>
-  )
-}
-
-function Feature({
-  icon,
-  title,
-  text,
-}: {
-  icon: React.ReactNode
-  title: string
-  text: string
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-card p-5 text-left">
-      <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-        {icon}
-      </span>
-      <h3 className="mt-3 font-medium">{title}</h3>
-      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{text}</p>
     </div>
   )
 }

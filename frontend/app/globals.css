@@ -90,9 +90,15 @@
   }
   html {
     scrollbar-gutter: stable;
+    /* Страховка от горизонтального overflow на мобильных: любой дочерний
+       элемент, который случайно оказывается шире вьюпорта (например,
+       длинное имя файла в flex-контейнере без min-w-0), не должен
+       растягивать весь документ вбок и ломать раскладку страницы. */
+    overflow-x: hidden;
   }
   body {
     @apply bg-background text-foreground;
+    overflow-x: hidden;
   }
 }
 
