@@ -36,6 +36,10 @@ class KitOut(BaseModel):
     sound_count: int
     created_at: datetime
 
+    owner_id: int | None = None
+    owner_username: str | None = None
+    owner_avatar_path: str | None = None
+
 
 class KitStatusOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -53,6 +57,8 @@ class KitCatalogItemOut(BaseModel):
     title: str
     slug: str
     author: str  # заполняется вручную из kit.owner.username, не через from_attributes
+    owner_username: str  # для ссылки на профиль — то же значение, что и author
+    owner_avatar_path: str | None = None  # заполняется вручную из kit.owner.avatar_path
     genre: str
     tags: list[str]
     cover_path: str | None

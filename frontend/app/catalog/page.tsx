@@ -12,6 +12,8 @@ function toKit(item: Awaited<ReturnType<typeof api.listCatalog>>[number]): Kit {
     id: item.slug,
     title: item.title,
     author: item.author,
+    ownerUsername: item.owner_username,
+    ownerAvatar: item.owner_avatar_path,
     cover: coverForKit(item),
     genre: item.genre,
     tags: item.tags,

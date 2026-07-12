@@ -1,9 +1,10 @@
 import Image from "next/image"
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { ArrowLeft, Download, Music2, HardDrive, User } from "lucide-react"
+import { ArrowLeft, Download, Music2, HardDrive } from "lucide-react"
 import { SiteHeader } from "@/components/site-header"
 import { FileBrowser } from "@/components/file-browser"
+import { KitAuthor } from "@/components/kit-author"
 import { Button } from "@/components/ui/button"
 import { api, absoluteMediaUrl, ApiError } from "@/lib/api"
 import { formatCount } from "@/lib/data"
@@ -64,9 +65,8 @@ export default async function KitPage({
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
               {kit.title}
             </h1>
-            <span className="mt-2 inline-flex w-fit items-center gap-1.5 text-muted-foreground">
-              <User className="size-4" />
-              {kit.author}
+            <span className="mt-2 inline-flex w-fit items-center">
+              <KitAuthor username={kit.owner_username} avatarPath={kit.owner_avatar_path} size="md" />
             </span>
 
             {kit.description && (

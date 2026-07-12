@@ -43,6 +43,8 @@ export function KitExplorer({
         id: item.slug,
         title: item.title,
         author: item.author,
+        ownerUsername: item.owner_username,
+        ownerAvatar: item.owner_avatar_path,
         cover: coverForKit(item),
         genre: item.genre,
         tags: item.tags,

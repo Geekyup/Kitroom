@@ -24,6 +24,16 @@ class UserRead(BaseModel):
     avatar_path: str | None = None
 
 
+class UserPublicOut(BaseModel):
+    """Публичный профиль — без email и прочих приватных полей,
+    отдаётся любому посетителю (страница автора, карточка кита)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    avatar_path: str | None = None
+
+
 class UserUpdateEmail(BaseModel):
     email: EmailStr
 

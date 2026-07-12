@@ -3,6 +3,7 @@ import Link from "next/link"
 import { Download, Music2 } from "lucide-react"
 import type { Kit } from "@/lib/data"
 import { formatCount } from "@/lib/data"
+import { KitAuthor } from "@/components/kit-author"
 
 export function KitCard({ kit }: { kit: Kit }) {
   return (
@@ -26,7 +27,9 @@ export function KitCard({ kit }: { kit: Kit }) {
             {kit.title}
           </h3>
         </Link>
-        <p className="mt-0.5 truncate text-sm text-muted-foreground">{kit.author}</p>
+        <div className="mt-1.5">
+          <KitAuthor username={kit.ownerUsername ?? kit.author} avatarPath={kit.ownerAvatar} />
+        </div>
 
         <div className="mt-4 flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">

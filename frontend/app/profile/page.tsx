@@ -67,6 +67,8 @@ export default function ProfilePage() {
             id: item.slug,
             title: item.title,
             author: item.author,
+            ownerUsername: item.owner_username,
+            ownerAvatar: item.owner_avatar_path,
             cover: item.cover_path ? absoluteMediaUrl(item.cover_path) : "/placeholder.svg",
             genre: item.genre,
             tags: item.tags,

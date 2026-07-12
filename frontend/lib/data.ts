@@ -16,6 +16,8 @@ export type Kit = {
   id: string
   title: string
   author: string
+  ownerUsername?: string
+  ownerAvatar?: string | null
   cover: string
   genre: string
   tags: string[]

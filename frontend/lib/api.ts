@@ -26,6 +26,8 @@ export type ApiKitCatalogItem = {
   title: string
   slug: string
   author: string
+  owner_username: string
+  owner_avatar_path: string | null
   genre: string
   tags: string[]
   cover_path: string | null
@@ -39,6 +41,13 @@ export type ApiKitCatalogItem = {
 export type ApiKitDetail = ApiKitCatalogItem & {
   description: string | null
   created_at: string
+  owner_id: number
+}
+
+export type ApiUserPublic = {
+  id: number
+  username: string
+  avatar_path: string | null
 }
 
 class ApiError extends Error {
@@ -108,6 +117,10 @@ export function coverForKit(item: Pick<ApiKitCatalogItem, "cover_path" | "genre"
   return GENRE_FALLBACK_COVERS[item.genre] ?? FALLBACK_COVER_LIST[item.id % FALLBACK_COVER_LIST.length]
 }
 
+export function avatarForUser(avatarPath: string | null | undefined): string {
+  return avatarPath ? absoluteMediaUrl(avatarPath) : "/placeholder-user.jpg"
+}
+
 export const api = {
   listCatalog(params?: { limit?: number; offset?: number }): Promise<ApiKitCatalogItem[]> {
     const search = new URLSearchParams()
@@ -128,6 +141,18 @@ export const api = {
   downloadKitUrl(slug: string): string {
     // прямая ссылка для <a href>, не через fetch — браузер сам стартует скачивание
     return `${API_URL}/api/v1/kits/${slug}/download`
+  },
+
+  getUserProfile(username: string): Promise<ApiUserPublic> {
+    return request(`/api/v1/users/${encodeURIComponent(username)}`)
+  },
+
+  getUserKits(username: string, params?: { limit?: number; offset?: number }): Promise<ApiKitCatalogItem[]> {
+    const search = new URLSearchParams()
+    if (params?.limit) search.set("limit", String(params.limit))
+    if (params?.offset) search.set("offset", String(params.offset))
+    const qs = search.toString()
+    return request(`/api/v1/users/${encodeURIComponent(username)}/kits${qs ? `?${qs}` : ""}`)
   },
 }
 

@@ -33,6 +33,11 @@ class KitService:
         self.storage = storage
         self.arq_pool = arq_pool
 
+    # ------------------------------------------------------------------
+    # Старый флоу — файл идёт через сервер (multipart). Оставлен для
+    # обратной совместимости / как fallback, если presigned недоступен
+    # (например, старый фронт, мобильные клиенты без прямого доступа к S3).
+    # ------------------------------------------------------------------
     async def create_kit(
         self,
         owner_id: int,
@@ -67,7 +72,19 @@ class KitService:
         await self.arq_pool.enqueue_job("process_kit", kit.id)
         return kit
 
-
+    # ------------------------------------------------------------------
+    # Новый флоу — presigned PUT. Файл льётся напрямую браузер -> S3,
+    # сервер в передаче байтов не участвует вообще.
+    #
+    #   1. init_kit_upload:    создаёт DrumKit(status=PENDING) с уже
+    #                          известным object_key, возвращает presigned
+    #                          PUT URL. Файл ещё не загружен.
+    #   2. (клиент делает PUT presigned_url напрямую в S3)
+    #   3. confirm_kit_upload: проверяет через head_object, что файл
+    #                          реально долетел, обновляет size_bytes из
+    #                          реальных метаданных S3 (не доверяем клиенту)
+    #                          и только тогда ставит job в очередь.
+    # ------------------------------------------------------------------
     async def init_kit_upload(
         self,
         owner_id: int,
@@ -160,6 +177,10 @@ class KitService:
         out = KitOut.model_validate(kit)
         if kit.cover_path:
             out.cover_path = await self.storage.get_url(kit.cover_path)
+        out.owner_id = kit.owner.id
+        out.owner_username = kit.owner.username
+        if kit.owner.avatar_path:
+            out.owner_avatar_path = await self.storage.get_url(kit.owner.avatar_path)
         return out
 
     async def get_kit_tree(self, slug: str) -> tuple[DrumKit, list[NodeOut]]:
@@ -189,6 +210,10 @@ class KitService:
                 title=kit.title,
                 slug=kit.slug,
                 author=kit.owner.username,
+                owner_username=kit.owner.username,
+                owner_avatar_path=(
+                    await self.storage.get_url(kit.owner.avatar_path) if kit.owner.avatar_path else None
+                ),
                 genre=kit.genre,
                 tags=kit.tags,
                 cover_path=await self.storage.get_url(kit.cover_path) if kit.cover_path else None,
@@ -209,6 +234,39 @@ class KitService:
                 title=kit.title,
                 slug=kit.slug,
                 author=kit.owner.username,
+                owner_username=kit.owner.username,
+                owner_avatar_path=(
+                    await self.storage.get_url(kit.owner.avatar_path) if kit.owner.avatar_path else None
+                ),
+                genre=kit.genre,
+                tags=kit.tags,
+                cover_path=await self.storage.get_url(kit.cover_path) if kit.cover_path else None,
+                sound_count=kit.sound_count,
+                downloads_count=kit.downloads_count,
+                size_bytes=kit.size_bytes,
+                status=kit.status,
+                error_message=kit.error_message,
+            )
+            for kit in kits
+        ]
+
+    async def list_by_username(
+        self, owner_id: int, limit: int = 50, offset: int = 0
+    ) -> list[KitCatalogItemOut]:
+        """Публичные киты автора для страницы его профиля — только READY,
+        в отличие от list_my_kits (используется владельцем для себя самого
+        и намеренно показывает ещё PENDING/PROCESSING/FAILED киты тоже)."""
+        kits = await self.kit_repo.list_ready_by_owner(owner_id=owner_id, limit=limit, offset=offset)
+        return [
+            KitCatalogItemOut(
+                id=kit.id,
+                title=kit.title,
+                slug=kit.slug,
+                author=kit.owner.username,
+                owner_username=kit.owner.username,
+                owner_avatar_path=(
+                    await self.storage.get_url(kit.owner.avatar_path) if kit.owner.avatar_path else None
+                ),
                 genre=kit.genre,
                 tags=kit.tags,
                 cover_path=await self.storage.get_url(kit.cover_path) if kit.cover_path else None,
@@ -245,6 +303,14 @@ class KitService:
         out = KitOut.model_validate(updated)
         if updated.cover_path:
             out.cover_path = await self.storage.get_url(updated.cover_path)
+        # kit.owner уже подгружен через selectinload в get_by_slug — используем
+        # его, а не updated.owner: update_fields делает db.get() без eager load,
+        # обращение к updated.owner тут упало бы MissingGreenlet (ленивая
+        # подгрузка relationship вне async event loop).
+        out.owner_id = kit.owner.id
+        out.owner_username = kit.owner.username
+        if kit.owner.avatar_path:
+            out.owner_avatar_path = await self.storage.get_url(kit.owner.avatar_path)
         return out
 
     async def delete_kit(self, slug: str, requester_id: int) -> None:
