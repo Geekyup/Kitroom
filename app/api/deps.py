@@ -17,7 +17,7 @@ from app.repositories.node_repository import NodeRepository
 from app.services.auth import AuthService
 from app.services.user import UserService
 from app.services.kit_service import KitService
-from app.storage.b2 import b2_storage, B2StorageBackend
+from app.storage.factory import StorageBackend, get_storage_backend
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -75,14 +75,14 @@ async def get_current_active_user(
     return user
 
 
-def get_storage() -> B2StorageBackend:
-    return b2_storage
+def get_storage() -> StorageBackend:
+    return get_storage_backend()
 
 
 def get_user_service(
     user_repo: UserRepository = Depends(get_user_repository),
     token_repo: RefreshTokenRepository = Depends(get_token_repository),
-    storage: B2StorageBackend = Depends(get_storage),
+    storage: StorageBackend = Depends(get_storage),
 ) -> UserService:
     return UserService(user_repo, token_repo, storage)
 
@@ -104,7 +104,7 @@ async def get_node_repository(db: AsyncSession = Depends(get_db)) -> NodeReposit
 async def get_kit_service(
     kit_repo: KitRepository = Depends(get_kit_repository),
     node_repo: NodeRepository = Depends(get_node_repository),
-    storage: B2StorageBackend = Depends(get_storage),
+    storage: StorageBackend = Depends(get_storage),
     arq_pool: ArqRedis = Depends(get_arq_pool),
 ) -> KitService:
     return KitService(kit_repo, node_repo, storage, arq_pool)

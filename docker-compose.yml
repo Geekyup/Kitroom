@@ -53,6 +53,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-12345}@postgres:5432/${POSTGRES_DB:-Drum}
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - kit_storage:/app/storage/uploads
     ports:
       - "8000:8000"
     depends_on:
@@ -78,6 +80,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-12345}@postgres:5432/${POSTGRES_DB:-Drum}
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - kit_storage:/app/storage/uploads
     command: arq app.worker.settings.WorkerSettings
     depends_on:
       postgres:
@@ -106,3 +110,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  kit_storage:

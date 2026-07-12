@@ -11,28 +11,17 @@ from app.core.exceptions import (
     ZipSlipDetected,
 )
 from app.db.models.drum_kit_node import DrumKitNode, NodeType
-from app.storage.b2 import B2StorageBackend
+from app.storage.factory import StorageBackend, get_storage_backend
 
 logger = logging.getLogger("kitroom.archive")
 
 
 class ArchiveService:
-    """
-    Скачивает приватный zip из B2, валидирует и распаковывает аудиофайлы,
-    заливая каждый обратно в B2 под kits/{kit_id}/extracted/... —
-    сохраняя структуру папок, нужную для проигрывания через <audio src=...>.
-    Оригинальный zip остаётся в B2 под kits/uploads/ для полного скачивания.
-    """
 
-    def __init__(self, storage: B2StorageBackend | None = None):
-        self.storage = storage or B2StorageBackend()
+    def __init__(self, storage: StorageBackend | None = None):
+        self.storage = storage or get_storage_backend()
 
     async def extract_and_validate(self, zip_key: str, kit_id: int) -> list[DrumKitNode]:
-        # Скачиваем архив НА ДИСК, а не в память — киты могут весить
-        # сотни МБ, и удержание всего файла в памяти (плюс временная
-        # копия при сборке из чанков) на контейнере с ограниченной
-        # памятью приводило к OOM kill прямо посреди скачивания, без
-        # единой ошибки в логах (ядро просто убивает процесс).
         with tempfile.TemporaryDirectory(prefix=f"kit-{kit_id}-") as tmp_dir:
             zip_path = Path(tmp_dir) / "archive.zip"
 
@@ -79,6 +68,24 @@ class ArchiveService:
                 folders.add("/".join(parts[:i]))
         return folders
 
+    def _folders_with_audio(
+        self, infos: list[zipfile.ZipInfo], folder_paths: set[str]
+    ) -> set[str]:
+
+        non_empty: set[str] = set()
+
+        for info in infos:
+            rel_path = info.filename.replace("\\", "/")
+            extension = Path(rel_path).suffix.lower()
+            if extension not in settings.ALLOWED_AUDIO_EXTENSIONS:
+                continue
+
+            parts = rel_path.split("/")
+            for i in range(1, len(parts)):
+                non_empty.add("/".join(parts[:i]))
+
+        return non_empty & folder_paths
+
     async def _build_nodes(
         self,
         kit_id: int,
@@ -90,7 +97,10 @@ class ArchiveService:
         nodes_by_path: dict[str, DrumKitNode] = {}
         order = 0
 
-        for folder in sorted(folder_paths, key=lambda p: p.count("/")):
+
+        non_empty_folders = self._folders_with_audio(infos, folder_paths)
+
+        for folder in sorted(non_empty_folders, key=lambda p: p.count("/")):
             parts = folder.split("/")
             parent_path = "/".join(parts[:-1]) if len(parts) > 1 else None
 
@@ -101,19 +111,12 @@ class ArchiveService:
                 relative_path=folder,
                 order_index=order,
             )
-            if parent_path is not None:
+            if parent_path is not None and parent_path in nodes_by_path:
                 node.parent = nodes_by_path[parent_path]
 
             nodes_by_path[folder] = node
             order += 1
 
-        # Сначала читаем все аудиофайлы из zip и готовим метаданные,
-        # НЕ трогая сеть — чтение из zip быстрое (данные уже в памяти).
-        # Загрузку в B2 делаем одним батчем через save_many_bytes ниже:
-        # раньше здесь на каждый файл вызывался save_bytes, который
-        # открывал новое TCP/TLS соединение — на архивах с десятками
-        # и сотнями файлов это давало огромные накладные расходы на
-        # handshake и растягивало обработку кита на много минут.
         upload_items: list[tuple[bytes, str, str]] = []
         file_meta: list[tuple[str, list[str], str | None, str, str, bytes]] = []
 

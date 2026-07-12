@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 
 class Settings(BaseSettings):
@@ -47,15 +47,55 @@ class Settings(BaseSettings):
     VERIFICATION_CODE_EXPIRE_MINUTES: int = 15
     PASSWORD_RESET_CODE_EXPIRE_MINUTES: int = 15
 
-    # Storage (Backblaze B2, S3-compatible)
+    # Storage backend switch: "local" (диск) или "b2" (Backblaze B2 / любой S3 API).
+    # Переключение — просто смена одной переменной окружения, без правок кода.
+    STORAGE_BACKEND: str = "local"
+
+    @field_validator("STORAGE_BACKEND")
+    @classmethod
+    def _validate_storage_backend(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in {"local", "b2"}:
+            raise ValueError('STORAGE_BACKEND must be "local" or "b2"')
+        return v
+
+    # Storage (Backblaze B2, S3-compatible) — обязательны, только если STORAGE_BACKEND=b2
     B2_KEY_ID: str = ""
     B2_APPLICATION_KEY: str = ""
     B2_BUCKET_NAME: str = ""
     B2_ENDPOINT_URL: str = ""
     B2_REGION: str = ""
+
+    # Storage (local disk) — обязательны, только если STORAGE_BACKEND=local.
+    # Единая корневая папка для всех ключей (kits/, avatars/) — совпадает
+    # с .gitignore (storage/uploads/*), чтобы реальные файлы не улетали в git.
+    UPLOADS_STORAGE_ROOT: str = "./storage/uploads"
+
+    # Публичный адрес бэкенда — нужен LocalStorageBackend, чтобы строить
+    # реальные URL на /static/... (у B2 для этого есть presigned URL,
+    # у диска такого механизма нет, поэтому URL собирается вручную).
+    BACKEND_URL: str = "http://localhost:8000"
+
     MAX_ZIP_SIZE_MB: int = 500
     MAX_FILES_PER_KIT: int = 2000
     ALLOWED_AUDIO_EXTENSIONS: set[str] = {".wav", ".mp3", ".aiff", ".flac"}
+
+    @model_validator(mode="after")
+    def _require_b2_vars_when_selected(self) -> "Settings":
+        if self.STORAGE_BACKEND == "b2":
+            required = {
+                "B2_KEY_ID": self.B2_KEY_ID,
+                "B2_APPLICATION_KEY": self.B2_APPLICATION_KEY,
+                "B2_BUCKET_NAME": self.B2_BUCKET_NAME,
+                "B2_ENDPOINT_URL": self.B2_ENDPOINT_URL,
+                "B2_REGION": self.B2_REGION,
+            }
+            missing = [name for name, value in required.items() if not value]
+            if missing:
+                raise ValueError(
+                    f"STORAGE_BACKEND=b2 requires these env vars to be set: {', '.join(missing)}"
+                )
+        return self
 
 
 settings = Settings()

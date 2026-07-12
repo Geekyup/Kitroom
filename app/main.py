@@ -14,6 +14,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.kits import router as kits_router
 from app.api.v1.kits_download import router as kits_download_router
 from app.api.v1.kits_tree import router as kits_tree_router
+from app.api.v1.storage_local import router as storage_local_router
 from app.core.config import settings
 from app.core.exceptions import AppException
 
@@ -48,6 +49,17 @@ app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(kits_router, prefix="/api/v1")
 app.include_router(kits_tree_router, prefix="/api/v1")
 app.include_router(kits_download_router, prefix="/api/v1")
+
+if settings.STORAGE_BACKEND == "local":
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    storage_root = Path(settings.UPLOADS_STORAGE_ROOT)
+    storage_root.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(storage_root)), name="static")
+
+    app.include_router(storage_local_router, prefix="/api/v1")
 
 
 if __name__ == "__main__":

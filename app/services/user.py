@@ -4,7 +4,7 @@ from app.core.exceptions import InvalidCredentials, SamePassword, UserAlreadyExi
 from app.core.security import hash_password, verify_password
 from app.db.models.user import User
 from app.repositories.auth import RefreshTokenRepository, UserRepository
-from app.storage.b2 import B2StorageBackend
+from app.storage.factory import StorageBackend, get_storage_backend
 
 
 class UserService:
@@ -12,11 +12,11 @@ class UserService:
         self,
         user_repo: UserRepository,
         token_repo: RefreshTokenRepository,
-        storage: B2StorageBackend | None = None,
+        storage: StorageBackend | None = None,
     ):
         self.user_repo = user_repo
         self.token_repo = token_repo
-        self.storage = storage or B2StorageBackend()
+        self.storage = storage or get_storage_backend()
 
     async def update_avatar(self, user: User, file: UploadFile) -> User:
         avatar_path = await self.storage.save_avatar(user.id, file)

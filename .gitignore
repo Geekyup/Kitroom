@@ -21,9 +21,7 @@ pip-delete-this-directory.txt
 migrations/versions/__pycache__/
 
 storage/uploads/*
-storage/public/*
 !storage/uploads/.gitkeep
-!storage/public/.gitkeep
 
 frontend/node_modules/
 frontend/.next/

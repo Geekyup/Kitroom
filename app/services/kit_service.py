@@ -17,7 +17,7 @@ from app.schemas.kit import (
     KitUploadInitOut,
 )
 from app.schemas.node import NodeOut
-from app.storage.b2 import B2StorageBackend
+from app.storage.factory import StorageBackend
 
 
 class KitService:
@@ -25,7 +25,7 @@ class KitService:
         self,
         kit_repo: KitRepository,
         node_repo: NodeRepository,
-        storage: B2StorageBackend,
+        storage: StorageBackend,
         arq_pool: ArqRedis,
     ):
         self.kit_repo = kit_repo
@@ -33,11 +33,6 @@ class KitService:
         self.storage = storage
         self.arq_pool = arq_pool
 
-    # ------------------------------------------------------------------
-    # Старый флоу — файл идёт через сервер (multipart). Оставлен для
-    # обратной совместимости / как fallback, если presigned недоступен
-    # (например, старый фронт, мобильные клиенты без прямого доступа к S3).
-    # ------------------------------------------------------------------
     async def create_kit(
         self,
         owner_id: int,
@@ -72,19 +67,7 @@ class KitService:
         await self.arq_pool.enqueue_job("process_kit", kit.id)
         return kit
 
-    # ------------------------------------------------------------------
-    # Новый флоу — presigned PUT. Файл льётся напрямую браузер -> S3,
-    # сервер в передаче байтов не участвует вообще.
-    #
-    #   1. init_kit_upload:    создаёт DrumKit(status=PENDING) с уже
-    #                          известным object_key, возвращает presigned
-    #                          PUT URL. Файл ещё не загружен.
-    #   2. (клиент делает PUT presigned_url напрямую в S3)
-    #   3. confirm_kit_upload: проверяет через head_object, что файл
-    #                          реально долетел, обновляет size_bytes из
-    #                          реальных метаданных S3 (не доверяем клиенту)
-    #                          и только тогда ставит job в очередь.
-    # ------------------------------------------------------------------
+
     async def init_kit_upload(
         self,
         owner_id: int,
@@ -129,7 +112,7 @@ class KitService:
 
         try:
             meta = await self.storage.head_object(kit.original_zip_path)
-        except ClientError:
+        except (ClientError, FileNotFoundError):
             raise UploadNotFound()
 
         size_bytes = meta.get("ContentLength", 0)
@@ -164,7 +147,7 @@ class KitService:
 
         try:
             await self.storage.head_object(object_key)
-        except ClientError:
+        except (ClientError, FileNotFoundError):
             raise UploadNotFound()
 
         await self.kit_repo.update_cover(kit.id, object_key)

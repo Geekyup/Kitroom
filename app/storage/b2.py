@@ -14,14 +14,6 @@ logger = logging.getLogger("kitroom.storage")
 
 
 class B2StorageBackend:
-    """
-    S3-совместимый storage backend (Backblaze B2 / Railway Bucket / любой S3 API).
-    Тот же интерфейс, что у LocalStorageBackend, но вместо путей на диске
-    возвращает object key — единый способ адресации что для
-    приватных (kits zip), так и для публичных (cover/avatar/extracted) объектов,
-    т.к. в S3-совместимых хранилищах нет разделения на "публичную папку" — публичность
-    обеспечивается presigned URL с ограниченным сроком жизни (см. get_url).
-    """
 
     def __init__(self):
         self.bucket = settings.B2_BUCKET_NAME
@@ -33,36 +25,17 @@ class B2StorageBackend:
             region_name=settings.B2_REGION,
             config=Config(
                 signature_version="s3v4",
-                # Обязательно для Railway Bucket и большинства self-hosted
-                # S3-совместимых сервисов (MinIO, Garage и т.д.) — без этого
-                # клиент пытается резолвить bucket.endpoint (virtual-hosted style)
-                # и падает с SignatureDoesNotMatch / DNS ошибкой.
-                # Backblaze B2 нормально работает с этой опцией тоже, так что
-                # переезд между провайдерами не ломает совместимость.
                 s3={"addressing_style": "path"},
-                # Явные таймауты — иначе зависший коннект молча ждёт минутами
-                # вместо быстрого фейла с понятной ошибкой.
-                # read_timeout уменьшен с 120 до 30: extracted-файлы (сэмплы)
-                # обычно небольшие, 120s на попытку с 5 retries давали до 10
-                # минут ожидания на одном подвисшем файле.
                 connect_timeout=10,
                 read_timeout=30,
                 retries={"max_attempts": 3, "mode": "standard"},
                 max_pool_connections=20,
             ),
         )
-        # Порог, с которого put_object заменяется на multipart upload
-        # с параллельной заливкой частей — резко ускоряет большие файлы.
-        # Уменьшенный chunk size (5MB, минимум для S3 multipart) и меньший
-        # параллелизм — компромисс в пользу стабильности на нестабильных
-        # сетях (Docker Desktop на Windows периодически рвёт долгие
-        # исходящие соединения на больших частях).
         self._multipart_threshold = 16 * 1024 * 1024  # 16MB
         self._multipart_chunksize = 8 * 1024 * 1024  # 8MB вместо 16MB
         self._multipart_concurrency = 4  # 4 вместо 8 — меньше шанс упереться в обрыв
 
-        # Параллелизм для batch-загрузки множества мелких файлов
-        # (extracted-сэмплы кита) в рамках одного переиспользуемого клиента.
         self._batch_concurrency = 8
 
     def _get_client(self):
@@ -102,18 +75,6 @@ class B2StorageBackend:
         items: list[tuple[bytes, str, str | None]],
         concurrency: int | None = None,
     ) -> None:
-        """
-        Батч-загрузка множества файлов через ОДИН переиспользуемый клиент
-        с ограниченным параллелизмом.
-
-        Используется ArchiveService для заливки всех extracted-сэмплов кита
-        разом — вместо создания нового TCP/TLS соединения на каждый файл
-        (как было раньше при последовательных save_bytes в цикле), что на
-        архивах с десятками-сотнями файлов давало огромные накладные расходы
-        на handshake и суммарно растягивало обработку на много минут.
-
-        items: список (data, key, content_type)
-        """
         if not items:
             return
 
@@ -147,19 +108,6 @@ class B2StorageBackend:
         logger.info("[batch-upload] ЗАВЕРШЕНО %d файлов за %.1fs", total, elapsed)
 
     async def download_to_file(self, key: str, dest_path: str, timeout_seconds: float = 300) -> int:
-        """
-        Стримит объект из S3 сразу на диск, НЕ накапливая его в памяти.
-
-        Нужен для больших архивов (сотни МБ): get_bytes() держит весь
-        файл в оперативке (плюс временную копию при join чанков) — на
-        контейнере с ограниченной памятью (Railway) это приводило к
-        OOM kill прямо посреди скачивания, без единой ошибки в логах
-        (ядро просто убивает процесс). Запись на диск чанками держит
-        потребление памяти на уровне одного chunk_size вне зависимости
-        от размера файла.
-
-        Возвращает количество записанных байт.
-        """
         async def _download() -> int:
             written = 0
             async with self._get_client() as client:
@@ -180,17 +128,6 @@ class B2StorageBackend:
             raise
 
     async def get_bytes(self, key: str, timeout_seconds: float = 300) -> bytes:
-        """
-        Используется для НЕБОЛЬШИХ объектов (обложки, аватары и т.п.).
-        Для больших архивов используй download_to_file — здесь файл
-        всё ещё целиком попадает в память.
-
-        Читаем поток ЧАНКАМИ через iter_chunks(), а не одним
-        await response["Body"].read(). botocore's read_timeout считается
-        между чанками (idle timeout), а не на всю операцию, так что
-        read() его не соблюдает как общий дедлайн — оборачиваем всё в
-        asyncio.wait_for с общим таймаутом.
-        """
         async def _download() -> bytes:
             async with self._get_client() as client:
                 response = await client.get_object(Bucket=self.bucket, Key=key)
@@ -209,7 +146,6 @@ class B2StorageBackend:
             raise
 
     async def get_url(self, key: str, expires_in: int = 3600) -> str:
-        """Presigned URL — замена /static/... для приватного бакета."""
         async with self._get_client() as client:
             return await client.generate_presigned_url(
                 "get_object",
@@ -220,15 +156,6 @@ class B2StorageBackend:
     async def get_upload_url(
         self, key: str, content_type: str = "application/zip", expires_in: int = 3600
     ) -> str:
-        """
-        Presigned PUT URL — клиент грузит файл НАПРЯМУЮ в S3, минуя бэкенд.
-        Даёт максимальную скорость аплоада, т.к. файл больше не проходит
-        через контейнер API (убирает двойной сетевой проход и упирание
-        в его CPU/память/сетевой канал, особенно критично на Docker Desktop).
-
-        Использование на фронте: получить URL, затем сделать
-        fetch(url, { method: "PUT", body: file, headers: { "Content-Type": content_type } })
-        """
         async with self._get_client() as client:
             return await client.generate_presigned_url(
                 "put_object",
@@ -241,24 +168,13 @@ class B2StorageBackend:
             )
 
     def generate_upload_key(self) -> str:
-        """Генерирует object_key для будущего кита без записи в S3 (для presigned-флоу)."""
         return f"kits/uploads/{uuid.uuid4()}.zip"
 
     async def head_object(self, key: str) -> dict:
-        """
-        Проверяет, что объект реально загружен в S3 (клиент отчитался "готово").
-        Возвращает метаданные (ContentLength и т.д.) или бросает ClientError,
-        если объекта нет — используй это перед постановкой в очередь на обработку.
-        """
         async with self._get_client() as client:
             return await client.head_object(Bucket=self.bucket, Key=key)
 
     def delete(self, key: str) -> None:
-        """
-        Синхронный интерфейс сохранён ради совместимости с KitService,
-        но сам вызов должен быть async — см. delete_async.
-        Оставлено как no-op с предупреждением; используйте delete_async.
-        """
         raise NotImplementedError("Use delete_async for B2StorageBackend")
 
     async def delete_async(self, key: str) -> None:
@@ -275,21 +191,6 @@ class B2StorageBackend:
                     await client.delete_objects(Bucket=self.bucket, Delete={"Objects": objects})
 
     async def _upload_fileobj(self, file: UploadFile, key: str) -> None:
-        """
-        Стримит файл в S3 чанками через upload_fileobj вместо чтения всего
-        файла в память (await file.read()).
-
-        Для больших файлов aioboto3/boto3 s3transfer автоматически включает
-        multipart upload (порог задаётся TransferConfig) и параллельно грузит
-        несколько частей — это даёт основной прирост скорости на файлах
-        от нескольких десятков МБ и выше, т.к. вместо одного медленного
-        последовательного запроса идёт N параллельных.
-
-        Логирует прогресс по мере передачи (через Callback у s3transfer) и
-        точное время старта/финиша/ошибки — это нужно, чтобы при обрыве
-        соединения было видно: сколько байт успело уйти, сколько времени
-        прошло с начала аплоада, и сразу ли рвётся или после N MB.
-        """
         from boto3.s3.transfer import TransferConfig
 
         transfer_config = TransferConfig(
@@ -299,10 +200,8 @@ class B2StorageBackend:
             use_threads=True,
         )
 
-        # UploadFile.file — это SpooledTemporaryFile с синхронным read(),
-        # upload_fileobj умеет работать с обычным file-like объектом.
         file.file.seek(0)
-        file.file.seek(0, 2)  # к концу, чтобы узнать размер
+        file.file.seek(0, 2)  
         total_size = file.file.tell()
         file.file.seek(0)
 
@@ -322,7 +221,6 @@ class B2StorageBackend:
                 pct = int(progress["transferred"] / total_size * 100)
             else:
                 pct = 0
-            # Логируем каждые ~10%, чтобы не заспамить логи на больших файлах
             if pct >= progress["last_logged_pct"] + 10:
                 elapsed = time.monotonic() - t_start
                 speed_mbps = (progress["transferred"] / 1024 / 1024) / elapsed if elapsed > 0 else 0
@@ -363,6 +261,3 @@ class B2StorageBackend:
             "[upload:%s] ЗАВЕРШЕНО %.2fMB за %.1fs, средняя скорость %.2f MB/s",
             upload_id, total_size / 1024 / 1024, elapsed, speed_mbps,
         )
-
-
-b2_storage = B2StorageBackend()
