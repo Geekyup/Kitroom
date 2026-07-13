@@ -46,7 +46,7 @@ export default async function KitPage({
         </Link>
 
         {/* Header */}
-        <div className="flex flex-col gap-6 sm:flex-row sm:gap-8">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8">
           <div className="relative aspect-square w-full shrink-0 overflow-hidden rounded-2xl border border-border sm:w-56 lg:w-64">
             <Image
               src={coverSrc}
