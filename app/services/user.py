@@ -1,6 +1,6 @@
 from fastapi import UploadFile
 
-from app.core.exceptions import InvalidCredentials, SamePassword, UserAlreadyExists
+from app.core.exceptions import InvalidCredentials, SamePassword, UserAlreadyExists, UsernameAlreadyExists
 from app.core.security import hash_password, verify_password
 from app.db.models.user import User
 from app.repositories.auth import RefreshTokenRepository, UserRepository
@@ -27,6 +27,12 @@ class UserService:
         if existing and existing.id != user.id:
             raise UserAlreadyExists()
         return await self.user_repo.update_email(user, new_email)
+
+    async def update_username(self, user: User, new_username: str) -> User:
+        existing = await self.user_repo.get_by_username(new_username)
+        if existing and existing.id != user.id:
+            raise UsernameAlreadyExists()
+        return await self.user_repo.update_username(user, new_username)
 
     async def change_password(
         self, user: User, current_password: str, new_password: str

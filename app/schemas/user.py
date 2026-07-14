@@ -38,6 +38,20 @@ class UserUpdateEmail(BaseModel):
     email: EmailStr
 
 
+class UserUpdateUsername(BaseModel):
+    username: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        v = v.strip()
+        if not (3 <= len(v) <= 50):
+            raise ValueError("Username must be between 3 and 50 characters long")
+        if not v.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("Username can only contain letters, digits, '_' and '-'")
+        return v
+
+
 class UserChangePassword(BaseModel):
     current_password: str
     new_password: str

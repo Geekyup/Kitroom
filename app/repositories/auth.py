@@ -68,6 +68,12 @@ class UserRepository:
         await self.db.refresh(user)
         return user
 
+    async def update_username(self, user: User, new_username: str) -> User:
+        user.username = new_username
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
     async def mark_verified(self, user: User) -> User:
         user.is_verified = True
         await self.db.commit()

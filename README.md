@@ -57,7 +57,7 @@
 
 ## Демонстрация
 
-![alt text](image-1.png)
+![](image.png)
 
 ---
 

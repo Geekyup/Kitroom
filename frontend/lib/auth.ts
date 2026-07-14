@@ -217,6 +217,17 @@ export const authApi = {
 
     return res.json() as Promise<AuthUser>
   },
+
+  async updateUsername(username: string): Promise<AuthUser> {
+    return authRequest<AuthUser>(
+      "/api/v1/auth/me/username",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ username }),
+      },
+      true,
+    )
+  },
 }
 
 // Обёртка для авторизованных запросов к остальному API (не auth-эндпоинты),

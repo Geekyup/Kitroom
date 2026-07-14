@@ -4,7 +4,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
-import { Upload, Download, Package, Music2, Camera, Loader2 } from "lucide-react"
+import { Upload, Download, Package, Music2, Camera, Loader2, Pencil } from "lucide-react"
 import { SiteHeader } from "@/components/site-header"
 import { ProfileKitList } from "@/components/profile-kit-list"
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,46 @@ export default function ProfilePage() {
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [avatarError, setAvatarError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const [editingUsername, setEditingUsername] = useState(false)
+  const [usernameDraft, setUsernameDraft] = useState("")
+  const [usernameSaving, setUsernameSaving] = useState(false)
+  const [usernameError, setUsernameError] = useState<string | null>(null)
+
+  function startEditingUsername() {
+    setUsernameDraft(user?.username ?? "")
+    setUsernameError(null)
+    setEditingUsername(true)
+  }
+
+  function cancelEditingUsername() {
+    setEditingUsername(false)
+    setUsernameError(null)
+  }
+
+  async function saveUsername() {
+    const trimmed = usernameDraft.trim()
+    if (!user || trimmed === user.username) {
+      setEditingUsername(false)
+      return
+    }
+    if (trimmed.length < 3) {
+      setUsernameError("Минимум 3 символа")
+      return
+    }
+
+    setUsernameSaving(true)
+    setUsernameError(null)
+    try {
+      await authApi.updateUsername(trimmed)
+      await refreshUser()
+      setEditingUsername(false)
+    } catch (err) {
+      setUsernameError(err instanceof AuthApiError ? err.message : "Не удалось сохранить имя")
+    } finally {
+      setUsernameSaving(false)
+    }
+  }
 
   async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -143,8 +183,41 @@ export default function ProfilePage() {
             />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-3xl font-semibold tracking-tight">{user.username}</h1>
+            {editingUsername ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  autoFocus
+                  value={usernameDraft}
+                  onChange={(e) => setUsernameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveUsername()
+                    if (e.key === "Escape") cancelEditingUsername()
+                  }}
+                  disabled={usernameSaving}
+                  className="h-11 max-w-xs rounded-lg border border-border bg-background px-3 text-2xl font-semibold tracking-tight outline-none focus:border-primary disabled:opacity-60"
+                />
+                <Button size="sm" onClick={saveUsername} disabled={usernameSaving}>
+                  {usernameSaving ? <Loader2 className="size-4 animate-spin" /> : "Сохранить"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={cancelEditingUsername} disabled={usernameSaving}>
+                  Отмена
+                </Button>
+              </div>
+            ) : (
+              <div className="group/name flex items-center gap-2">
+                <h1 className="text-3xl font-semibold tracking-tight">{user.username}</h1>
+                <button
+                  type="button"
+                  onClick={startEditingUsername}
+                  aria-label="Редактировать имя"
+                  className="text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/name:opacity-100"
+                >
+                  <Pencil className="size-4" />
+                </button>
+              </div>
+            )}
             <p className="text-muted-foreground">{user.email}</p>
+            {usernameError && <p className="mt-1 text-sm text-destructive">{usernameError}</p>}
             {avatarError && <p className="mt-1 text-sm text-destructive">{avatarError}</p>}
           </div>
           <Button render={<Link href="/upload" />} size="lg" className="h-11 px-5">

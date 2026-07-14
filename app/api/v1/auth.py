@@ -17,7 +17,7 @@ from app.schemas.auth import (
     ResendVerificationRequest,
 )
 from app.schemas.token import RefreshRequest, TokenPair
-from app.schemas.user import UserCreate, UserRead
+from app.schemas.user import UserCreate, UserRead, UserUpdateUsername
 from app.services.auth import AuthService
 from app.services.user import UserService
 
@@ -153,6 +153,16 @@ async def upload_avatar(
     user_service: UserService = Depends(get_user_service),
 ):
     updated = await user_service.update_avatar(current_user, file)
+    return await _serialize_user(updated, user_service)
+
+
+@router.patch("/me/username", response_model=UserRead)
+async def update_username(
+    data: UserUpdateUsername,
+    current_user: User = Depends(get_current_active_user),
+    user_service: UserService = Depends(get_user_service),
+):
+    updated = await user_service.update_username(current_user, data.username)
     return await _serialize_user(updated, user_service)
 
 
