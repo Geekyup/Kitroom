@@ -57,7 +57,7 @@
 
 ## Демонстрация
 
-![](image.png)
+![alt text](image.png)
 
 ---
 
@@ -143,4 +143,4 @@ router → service → repository → db
 
 ### JWT-токены Google OAuth передаются через hash-фрагмент URL, а не query-параметр
 
-После Google-логина backend не может отдать JSON браузеру напрямую (это редирект, а не fetch-запрос), поэтому токены передаются через `#access_token=...&refresh_token=...` в URL. Hash-фрагмент, в отличие от query-параметра, не уходит на сервер (не попадает в логи nginx/uvicorn и в заголовок `Referer`) — фронтенд читает его на клиенте через `window.location.hash`.
+После Google-логина backend не может отдать JSON браузеру напрямую (это редирект, а не fetch-запрос), поэтому токены передаются через `#access_token=...&refresh_token=...` в URL. Hash-фрагмент, в отличие от query-параметра, не уходит на сервер (не попадает в логи nginx/uvicorn и в заголовок `Referer`) — фронтенд читает его на клиенте через `window.location.hash`
