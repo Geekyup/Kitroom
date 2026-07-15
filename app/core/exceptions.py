@@ -128,4 +128,4 @@ class SamePassword(AppException):
 
 class UploadNotFound(AppException):
     status_code = 404
-    detail = "File not found in storage — upload incomplete or invalid key"s
+    detail = "File not found in storage — upload incomplete or invalid key"
