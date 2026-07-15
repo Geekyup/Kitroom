@@ -32,9 +32,9 @@ class B2StorageBackend:
                 max_pool_connections=20,
             ),
         )
-        self._multipart_threshold = 16 * 1024 * 1024  # 16MB
-        self._multipart_chunksize = 8 * 1024 * 1024  # 8MB вместо 16MB
-        self._multipart_concurrency = 4  # 4 вместо 8 — меньше шанс упереться в обрыв
+        self._multipart_threshold = 16 * 1024 * 1024  
+        self._multipart_chunksize = 8 * 1024 * 1024  
+        self._multipart_concurrency = 4  
 
         self._batch_concurrency = 8
 

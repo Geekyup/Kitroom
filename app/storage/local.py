@@ -22,7 +22,6 @@ def register_upload_token(key: str, content_type: str) -> str:
 
 
 def resolve_upload_token(token: str) -> str | None:
-    """Возвращает object key для токена, если он существует и не истёк."""
     entry = _pending_uploads.get(token)
     if entry is None:
         return None
@@ -56,7 +55,6 @@ class LocalStorageBackend:
         return key
 
     async def save_upload(self, file: UploadFile) -> str:
-        """Сохраняет оригинальный zip, возвращает object_key (как B2)."""
         key = f"kits/uploads/{uuid.uuid4()}.zip"
         return await self._write_upload_file(file, key)
 
@@ -109,12 +107,6 @@ class LocalStorageBackend:
         return f"kits/uploads/{uuid.uuid4()}.zip"
 
     async def head_object(self, key: str) -> dict:
-        """
-        Аналог S3 head_object — бросает FileNotFoundError, если объекта нет
-        (в KitService это ловится как ClientError для B2; для local режима
-        см. обработку в storage_local-роуте/KitService, где нужно ловить
-        оба типа исключений одинаково).
-        """
         path = self._path_for_key(key)
         if not path.exists():
             raise FileNotFoundError(key)
@@ -130,8 +122,6 @@ class LocalStorageBackend:
         self.delete(key)
 
     async def delete_prefix(self, prefix: str) -> None:
-        """Удаляет все файлы под key-префиксом — аналог B2 delete_prefix
-        (используется для чистки kits/{id}/extracted/ и т.д.)."""
         base = self._path_for_key(prefix)
         if not base.exists():
             return
@@ -149,8 +139,6 @@ class LocalStorageBackend:
             base.rmdir()
 
     def _cleanup_empty_parents(self, folder: Path) -> None:
-        """После удаления файла подчищает опустевшие родительские папки,
-        не поднимаясь выше self.root."""
         current = folder
         while current != self.root and current.is_relative_to(self.root):
             if not current.exists():

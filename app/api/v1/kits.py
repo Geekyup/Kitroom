@@ -15,9 +15,6 @@ from app.services.kit_service import KitService
 router = APIRouter(prefix="/kits", tags=["kits"])
 
 
-# ----------------------------------------------------------------------
-# Старый флоу — файл идёт multipart через сервер. Оставлен как fallback.
-# ----------------------------------------------------------------------
 @router.post("", response_model=KitOut, status_code=201)
 async def upload_kit(
     title: str = Form(...),
@@ -43,9 +40,6 @@ async def upload_kit(
     return KitOut.model_validate(kit)
 
 
-# ----------------------------------------------------------------------
-# Новый флоу — presigned PUT. Файл льётся напрямую браузер -> S3.
-# ----------------------------------------------------------------------
 class KitUploadInitRequest(BaseModel):
     title: str
     genre: str
@@ -60,12 +54,6 @@ async def init_kit_upload(
     current_user: User = Depends(get_current_active_user),
     kit_service: KitService = Depends(get_kit_service),
 ) -> KitUploadInitOut:
-    """
-    Шаг 1 presigned-флоу: создаёт кит в статусе PENDING и возвращает
-    presigned PUT URL. Файл ещё не загружен — клиент грузит его
-    напрямую в S3 по возвращённому upload_url, затем вызывает
-    /kits/{id}/confirm-upload.
-    """
     tag_list = [t.strip() for t in payload.tags.split(",") if t.strip()]
 
     return await kit_service.init_kit_upload(
@@ -84,11 +72,6 @@ async def confirm_kit_upload(
     current_user: User = Depends(get_current_active_user),
     kit_service: KitService = Depends(get_kit_service),
 ) -> KitOut:
-    """
-    Шаг 2 presigned-флоу: вызывается после того, как клиент завершил
-    PUT файла напрямую в S3. Проверяет через head_object, что файл
-    реально долетел, и только тогда ставит job на обработку в очередь.
-    """
     kit = await kit_service.confirm_kit_upload(kit_id, requester_id=current_user.id)
     return KitOut.model_validate(kit)
 

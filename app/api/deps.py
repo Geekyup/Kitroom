@@ -22,8 +22,6 @@ from app.storage.factory import StorageBackend, get_storage_backend
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
-# --- Auth dependencies ---
-
 def get_user_repository(db: AsyncSession = Depends(get_db)) -> UserRepository:
     return UserRepository(db)
 
@@ -86,8 +84,6 @@ def get_user_service(
 ) -> UserService:
     return UserService(user_repo, token_repo, storage)
 
-
-# --- Drumkit dependencies ---
 
 async def get_arq_pool(request: Request) -> ArqRedis:
     return request.app.state.arq_pool

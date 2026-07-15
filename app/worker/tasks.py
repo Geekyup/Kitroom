@@ -28,8 +28,6 @@ async def process_kit(ctx: dict, kit_id: int) -> None:
         logger.info("kit=%s статус -> PROCESSING", kit_id)
 
         try:
-            # Чистим ноды от возможной предыдущей незавершённой попытки —
-            # делает ретрай (arq max_tries) идемпотентным.
             await node_repo.delete_by_kit(kit_id)
 
             archive_service = ArchiveService()
@@ -48,9 +46,6 @@ async def process_kit(ctx: dict, kit_id: int) -> None:
             try:
                 await kit_repo.update_status(kit_id, KitStatus.FAILED, error_message=e.detail)
             except Exception:
-                # Если и запись статуса FAILED не проходит (например БД
-                # всё ещё недоступна) — не глушим ошибку молча, пусть
-                # arq увидит краш и сам ретраит по своей политике.
                 raise
 
         except Exception as e:

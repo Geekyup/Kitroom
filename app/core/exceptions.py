@@ -8,7 +8,7 @@ class AppException(Exception):
         super().__init__(self.detail)
 
 
-# --- Auth ---
+# Auth 
 
 class InvalidCredentials(AppException):
     status_code = 401
@@ -70,7 +70,7 @@ class InvalidVerificationCode(AppException):
     detail = "Invalid or expired verification code"
 
 
-# --- Kit lifecycle ---
+# Kit lifecycle 
 
 class KitNotFound(AppException):
     status_code = 404
@@ -87,7 +87,7 @@ class KitProcessingFailed(AppException):
     detail = "Kit processing failed"
 
 
-# --- Upload / archive validation ---
+# Upload / archive validation 
 
 class ArchiveTooLarge(AppException):
     status_code = 413
@@ -114,7 +114,7 @@ class ZipSlipDetected(AppException):
     detail = "Archive contains unsafe file paths"
 
 
-# --- Ownership ---
+# Ownership
 
 class NotKitOwner(AppException):
     status_code = 403
@@ -128,4 +128,4 @@ class SamePassword(AppException):
 
 class UploadNotFound(AppException):
     status_code = 404
-    detail = "Файл не найден в хранилище — аплоад не завершён или ключ неверный"
+    detail = "File not found in storage — upload incomplete or invalid key"s

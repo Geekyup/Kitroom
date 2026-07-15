@@ -85,11 +85,6 @@ class KitRepository:
         await self.db.commit()
 
     async def update_size(self, kit_id: int, size_bytes: int) -> None:
-        """
-        Используется в presigned-флоу после confirm-upload — размер
-        файла берётся из head_object (реальные метаданные S3), а не
-        из клиента, т.к. клиенту в этом флоу мы не доверяем при init.
-        """
         kit = await self.get_by_id(kit_id)
         kit.size_bytes = size_bytes
         await self.db.commit()

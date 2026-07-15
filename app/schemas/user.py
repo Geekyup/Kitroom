@@ -25,8 +25,6 @@ class UserRead(BaseModel):
 
 
 class UserPublicOut(BaseModel):
-    """Публичный профиль — без email и прочих приватных полей,
-    отдаётся любому посетителю (страница автора, карточка кита)."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int

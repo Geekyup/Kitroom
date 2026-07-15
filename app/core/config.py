@@ -5,7 +5,7 @@ from pydantic import field_validator, model_validator
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
- # App
+    # App
     DEBUG: bool = False
     PROJECT_NAME: str = "DrumKit Service"
 
@@ -47,8 +47,6 @@ class Settings(BaseSettings):
     VERIFICATION_CODE_EXPIRE_MINUTES: int = 15
     PASSWORD_RESET_CODE_EXPIRE_MINUTES: int = 15
 
-    # Storage backend switch: "local" (диск) или "b2" (Backblaze B2 / любой S3 API).
-    # Переключение — просто смена одной переменной окружения, без правок кода.
     STORAGE_BACKEND: str = "local"
 
     @field_validator("STORAGE_BACKEND")
@@ -66,14 +64,8 @@ class Settings(BaseSettings):
     B2_ENDPOINT_URL: str = ""
     B2_REGION: str = ""
 
-    # Storage (local disk) — обязательны, только если STORAGE_BACKEND=local.
-    # Единая корневая папка для всех ключей (kits/, avatars/) — совпадает
-    # с .gitignore (storage/uploads/*), чтобы реальные файлы не улетали в git.
     UPLOADS_STORAGE_ROOT: str = "./storage/uploads"
 
-    # Публичный адрес бэкенда — нужен LocalStorageBackend, чтобы строить
-    # реальные URL на /static/... (у B2 для этого есть presigned URL,
-    # у диска такого механизма нет, поэтому URL собирается вручную).
     BACKEND_URL: str = "http://localhost:8000"
 
     MAX_ZIP_SIZE_MB: int = 500

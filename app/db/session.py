@@ -8,11 +8,6 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_timeout=10,
     connect_args={
-        # timeout — сколько ждём установления самого TCP/asyncpg-соединения.
-        # command_timeout — сколько ждём ответ на конкретный запрос/commit;
-        # без этого зависший на стороне Postgres (рестарт, failover,
-        # обрыв сети) запрос будет висеть бесконечно, а не падать с ошибкой,
-        # которую можно поймать и обработать/ретраить.
         "timeout": 10,
         "command_timeout": 30,
     },

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-import app.db.models  # noqa: F401 — регистрирует все модели в реестре SQLAlchemy
+import app.db.models 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.kits import router as kits_router
 from app.api.v1.kits_download import router as kits_download_router
@@ -57,15 +57,10 @@ if settings.STORAGE_BACKEND == "local":
 
     from fastapi.staticfiles import StaticFiles
 
-    # /static раздаёт файлы напрямую с диска — это то, на что указывают
-    # URL, которые строит LocalStorageBackend.get_url(). При STORAGE_BACKEND=b2
-    # этот роут не нужен вообще: там URL — presigned ссылки прямо на S3.
     storage_root = Path(settings.UPLOADS_STORAGE_ROOT)
     storage_root.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(storage_root)), name="static")
 
-    # PUT-эндпоинт, принимающий "presigned"-совместимые загрузки на диск —
-    # см. app/storage/local.py:get_upload_url и app/api/v1/storage_local.py
     app.include_router(storage_local_router, prefix="/api/v1")
 
 

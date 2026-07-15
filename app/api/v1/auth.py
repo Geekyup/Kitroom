@@ -87,10 +87,6 @@ async def google_callback(
         google_id=user_info["sub"], email=user_info["email"]
     )
 
-    # Это редирект браузера (не fetch из JS), поэтому JSON здесь бесполезен —
-    # отдаём токены фронтенду через hash-фрагмент URL: он не улетает на сервер
-    # (ни в логи nginx/uvicorn, ни в заголовок Referer), а страница на фронте
-    # читает его через window.location.hash и сохраняет в localStorage.
     redirect_url = (
         f"{settings.FRONTEND_URL}/auth/google/callback"
         f"#access_token={tokens.access_token}&refresh_token={tokens.refresh_token}"
