@@ -122,7 +122,13 @@ export function SiteHeader({ initialQuery = "" }: { initialQuery?: string }) {
                 Регистрация
               </Button>
             </>
-          ) : null}
+          ) : (
+            <>
+              <div className="h-10 w-36 animate-pulse rounded-lg bg-muted" />
+              <div className="h-10 w-28 animate-pulse rounded-lg bg-muted" />
+              <div className="h-10 w-10 animate-pulse rounded-lg bg-muted" />
+            </>
+          )}
         </div>
 
         <button
