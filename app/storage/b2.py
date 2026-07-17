@@ -3,6 +3,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 
 import aioboto3
 from botocore.config import Config
@@ -32,17 +33,42 @@ class B2StorageBackend:
                 max_pool_connections=20,
             ),
         )
-        self._multipart_threshold = 16 * 1024 * 1024  
-        self._multipart_chunksize = 8 * 1024 * 1024  
-        self._multipart_concurrency = 4  
-
+        self._multipart_threshold = 16 * 1024 * 1024
+        self._multipart_chunksize = 8 * 1024 * 1024
+        self._multipart_concurrency = 4
         self._batch_concurrency = 8
 
-    def _get_client(self):
-        return self._session.client("s3", **self._client_kwargs)
+        self._client = None
+        self._client_ctx = None
+        self._connect_lock = asyncio.Lock()
+
+    async def connect(self) -> None:
+        """Open the long-lived S3 client. Call once on app startup."""
+        if self._client is not None:
+            return
+        async with self._connect_lock:
+            if self._client is not None:
+                return
+            self._client_ctx = self._session.client("s3", **self._client_kwargs)
+            self._client = await self._client_ctx.__aenter__()
+            logger.info("B2 client connected (bucket=%s)", self.bucket)
+
+    async def close(self) -> None:
+        if self._client_ctx is not None:
+            await self._client_ctx.__aexit__(None, None, None)
+            self._client = None
+            self._client_ctx = None
+            logger.info("B2 client closed")
+
+    def _require_client(self):
+        if self._client is None:
+            raise RuntimeError(
+                "B2StorageBackend client is not connected. "
+                "Call `await storage.connect()` during app startup."
+            )
+        return self._client
 
     async def save_upload(self, file: UploadFile) -> str:
-        """Загружает оригинальный zip, возвращает object_key."""
         key = f"kits/uploads/{uuid.uuid4()}.zip"
         await self._upload_fileobj(file, key)
         return key
@@ -59,139 +85,149 @@ class B2StorageBackend:
         await self._upload_fileobj(file, key)
         return key
 
-    async def save_bytes(self, data: bytes, key: str, content_type: str | None = None) -> str:
-        """Используется для одиночной загрузки (одна операция — один клиент)."""
-        async with self._get_client() as client:
-            await client.put_object(
-                Bucket=self.bucket,
-                Key=key,
-                Body=data,
-                ContentType=content_type or "application/octet-stream",
-            )
+    async def save_bytes(self, data: bytes, key: str, content_type: Optional[str] = None) -> str:
+        client = self._require_client()
+        await client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=data,
+            ContentType=content_type or "application/octet-stream",
+        )
         return key
 
     async def save_many_bytes(
         self,
-        items: list[tuple[bytes, str, str | None]],
-        concurrency: int | None = None,
+        items: list[tuple[bytes, str, Optional[str]]],
+        concurrency: Optional[int] = None,
     ) -> None:
         if not items:
             return
 
+        client = self._require_client()
         sem = asyncio.Semaphore(concurrency or self._batch_concurrency)
         total = len(items)
         completed = 0
         t_start = time.monotonic()
 
-        async with self._get_client() as client:
-
-            async def _put(data: bytes, key: str, content_type: str | None) -> None:
-                nonlocal completed
-                async with sem:
-                    await client.put_object(
-                        Bucket=self.bucket,
-                        Key=key,
-                        Body=data,
-                        ContentType=content_type or "application/octet-stream",
+        async def _put(data: bytes, key: str, content_type: Optional[str]) -> None:
+            nonlocal completed
+            async with sem:
+                await client.put_object(
+                    Bucket=self.bucket,
+                    Key=key,
+                    Body=data,
+                    ContentType=content_type or "application/octet-stream",
+                )
+                completed += 1
+                if completed % 10 == 0 or completed == total:
+                    elapsed = time.monotonic() - t_start
+                    logger.info(
+                        "[batch-upload] %d/%d files uploaded in %.1fs",
+                        completed, total, elapsed,
                     )
-                    completed += 1
-                    if completed % 10 == 0 or completed == total:
-                        elapsed = time.monotonic() - t_start
-                        logger.info(
-                            "[batch-upload] %d/%d файлов загружено за %.1fs",
-                            completed, total, elapsed,
-                        )
 
-            await asyncio.gather(*[_put(d, k, c) for d, k, c in items])
+        await asyncio.gather(*[_put(d, k, c) for d, k, c in items])
 
         elapsed = time.monotonic() - t_start
-        logger.info("[batch-upload] ЗАВЕРШЕНО %d файлов за %.1fs", total, elapsed)
+        logger.info("[batch-upload] DONE %d files in %.1fs", total, elapsed)
 
     async def download_to_file(self, key: str, dest_path: str, timeout_seconds: float = 300) -> int:
+        client = self._require_client()
+
         async def _download() -> int:
             written = 0
-            async with self._get_client() as client:
-                response = await client.get_object(Bucket=self.bucket, Key=key)
-                with open(dest_path, "wb") as f:
-                    async for chunk in response["Body"].iter_chunks(chunk_size=1024 * 1024):
-                        f.write(chunk)
-                        written += len(chunk)
+            response = await client.get_object(Bucket=self.bucket, Key=key)
+            with open(dest_path, "wb") as f:
+                async for chunk in response["Body"].iter_chunks(chunk_size=1024 * 1024):
+                    f.write(chunk)
+                    written += len(chunk)
             return written
 
         try:
             return await asyncio.wait_for(_download(), timeout=timeout_seconds)
         except asyncio.TimeoutError:
             logger.error(
-                "download_to_file: скачивание %s не уложилось в %.0fs — обрыв/слишком медленный канал",
+                "download_to_file: downloading %s did not complete within %.0fs "
+                "— connection dropped or channel too slow",
                 key, timeout_seconds,
             )
             raise
 
     async def get_bytes(self, key: str, timeout_seconds: float = 300) -> bytes:
+        client = self._require_client()
+
         async def _download() -> bytes:
-            async with self._get_client() as client:
-                response = await client.get_object(Bucket=self.bucket, Key=key)
-                chunks: list[bytes] = []
-                async for chunk in response["Body"].iter_chunks(chunk_size=1024 * 1024):
-                    chunks.append(chunk)
-                return b"".join(chunks)
+            response = await client.get_object(Bucket=self.bucket, Key=key)
+            chunks: list[bytes] = []
+            async for chunk in response["Body"].iter_chunks(chunk_size=1024 * 1024):
+                chunks.append(chunk)
+            return b"".join(chunks)
 
         try:
             return await asyncio.wait_for(_download(), timeout=timeout_seconds)
         except asyncio.TimeoutError:
             logger.error(
-                "get_bytes: скачивание %s не уложилось в %.0fs — обрыв/слишком медленный канал",
+                "get_bytes: downloading %s did not complete within %.0fs "
+                "— connection dropped or channel too slow",
                 key, timeout_seconds,
             )
             raise
 
     async def get_url(self, key: str, expires_in: int = 3600) -> str:
-        async with self._get_client() as client:
-            return await client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": self.bucket, "Key": key},
-                ExpiresIn=expires_in,
-            )
+        client = self._require_client()
+        return await client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": key},
+            ExpiresIn=expires_in,
+        )
 
     async def get_upload_url(
         self, key: str, content_type: str = "application/zip", expires_in: int = 3600
     ) -> str:
-        async with self._get_client() as client:
-            return await client.generate_presigned_url(
-                "put_object",
-                Params={
-                    "Bucket": self.bucket,
-                    "Key": key,
-                    "ContentType": content_type,
-                },
-                ExpiresIn=expires_in,
-            )
+        client = self._require_client()
+        return await client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "ContentType": content_type,
+            },
+            ExpiresIn=expires_in,
+        )
 
     def generate_upload_key(self) -> str:
         return f"kits/uploads/{uuid.uuid4()}.zip"
 
     async def head_object(self, key: str) -> dict:
-        async with self._get_client() as client:
-            return await client.head_object(Bucket=self.bucket, Key=key)
-
-    def delete(self, key: str) -> None:
-        raise NotImplementedError("Use delete_async for B2StorageBackend")
+        client = self._require_client()
+        return await client.head_object(Bucket=self.bucket, Key=key)
 
     async def delete_async(self, key: str) -> None:
-        async with self._get_client() as client:
-            await client.delete_object(Bucket=self.bucket, Key=key)
+        client = self._require_client()
+        await client.delete_object(Bucket=self.bucket, Key=key)
 
     async def delete_prefix(self, prefix: str) -> None:
-        """Удаляет все объекты под префиксом — для очистки kits/{id}/extracted/."""
-        async with self._get_client() as client:
-            paginator = client.get_paginator("list_objects_v2")
-            async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-                objects = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
-                if objects:
-                    await client.delete_objects(Bucket=self.bucket, Delete={"Objects": objects})
+        """Delete all objects under a prefix — used to clean up kits/{id}/extracted/."""
+        client = self._require_client()
+        paginator = client.get_paginator("list_objects_v2")
+        async for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            objects = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+            if objects:
+                await client.delete_objects(Bucket=self.bucket, Delete={"Objects": objects})
+
+    @staticmethod
+    def _get_file_size_sync(fileobj) -> int:
+        """Blocking seek/tell, meant to run in an executor thread."""
+        fileobj.seek(0)
+        fileobj.seek(0, 2)
+        size = fileobj.tell()
+        fileobj.seek(0)
+        return size
 
     async def _upload_fileobj(self, file: UploadFile, key: str) -> None:
         from boto3.s3.transfer import TransferConfig
+
+        client = self._require_client()
 
         transfer_config = TransferConfig(
             multipart_threshold=self._multipart_threshold,
@@ -200,14 +236,14 @@ class B2StorageBackend:
             use_threads=True,
         )
 
-        file.file.seek(0)
-        file.file.seek(0, 2)  
-        total_size = file.file.tell()
-        file.file.seek(0)
+        loop = asyncio.get_running_loop()
+        total_size = await loop.run_in_executor(
+            None, self._get_file_size_sync, file.file
+        )
 
         upload_id = uuid.uuid4().hex[:8]
         logger.info(
-            "[upload:%s] СТАРТ key=%s size=%.2fMB chunk=%dMB concurrency=%d",
+            "[upload:%s] START key=%s size=%.2fMB chunk=%dMB concurrency=%d",
             upload_id, key, total_size / 1024 / 1024,
             self._multipart_chunksize // (1024 * 1024), self._multipart_concurrency,
         )
@@ -216,6 +252,7 @@ class B2StorageBackend:
         t_start = time.monotonic()
 
         def _progress_callback(bytes_transferred: int) -> None:
+            # Called from aioboto3/boto3's internal transfer threads.
             progress["transferred"] += bytes_transferred
             if total_size > 0:
                 pct = int(progress["transferred"] / total_size * 100)
@@ -225,26 +262,25 @@ class B2StorageBackend:
                 elapsed = time.monotonic() - t_start
                 speed_mbps = (progress["transferred"] / 1024 / 1024) / elapsed if elapsed > 0 else 0
                 logger.info(
-                    "[upload:%s] прогресс %d%% (%.2f/%.2f MB) за %.1fs, скорость ~%.2f MB/s",
+                    "[upload:%s] progress %d%% (%.2f/%.2f MB) in %.1fs, speed ~%.2f MB/s",
                     upload_id, pct, progress["transferred"] / 1024 / 1024,
                     total_size / 1024 / 1024, elapsed, speed_mbps,
                 )
                 progress["last_logged_pct"] = pct
 
         try:
-            async with self._get_client() as client:
-                await client.upload_fileobj(
-                    file.file,
-                    self.bucket,
-                    key,
-                    ExtraArgs={"ContentType": file.content_type or "application/octet-stream"},
-                    Config=transfer_config,
-                    Callback=_progress_callback,
-                )
+            await client.upload_fileobj(
+                file.file,
+                self.bucket,
+                key,
+                ExtraArgs={"ContentType": file.content_type or "application/octet-stream"},
+                Config=transfer_config,
+                Callback=_progress_callback,
+            )
         except Exception as e:
             elapsed = time.monotonic() - t_start
             logger.error(
-                "[upload:%s] ОБРЫВ после %.2f/%.2f MB (%.0f%%), за %.1fs: %s: %s",
+                "[upload:%s] FAILED after %.2f/%.2f MB (%.0f%%), in %.1fs: %s: %s",
                 upload_id,
                 progress["transferred"] / 1024 / 1024,
                 total_size / 1024 / 1024,
@@ -258,6 +294,6 @@ class B2StorageBackend:
         elapsed = time.monotonic() - t_start
         speed_mbps = (total_size / 1024 / 1024) / elapsed if elapsed > 0 else 0
         logger.info(
-            "[upload:%s] ЗАВЕРШЕНО %.2fMB за %.1fs, средняя скорость %.2f MB/s",
+            "[upload:%s] DONE %.2fMB in %.1fs, average speed %.2f MB/s",
             upload_id, total_size / 1024 / 1024, elapsed, speed_mbps,
         )

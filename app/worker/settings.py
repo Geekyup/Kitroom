@@ -1,6 +1,6 @@
 from arq.connections import RedisSettings
 
-import app.core.logging  # noqa: F401 — настраивает logging.basicConfig для процесса воркера
+import app.core.logging  
 import app.db.models
 from app.core.config import settings
 from app.worker.tasks import process_kit
