@@ -6,6 +6,7 @@ frontend/.env*.local
 
 __pycache__/
 *.py[cod]
+.pytest_cache/
 *$py.class
 *.so
 .Python
