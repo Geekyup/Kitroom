@@ -95,6 +95,11 @@ cd frontend
 npm install
 npm run dev                     # UI на :3000
 ```
+### Тесты
+
+```bash
+py -m pytest tests/ -v
+```
 
 ### Основные переменные окружения
 
