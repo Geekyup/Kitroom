@@ -43,7 +43,6 @@ class B2StorageBackend:
         self._connect_lock = asyncio.Lock()
 
     async def connect(self) -> None:
-        """Open the long-lived S3 client. Call once on app startup."""
         if self._client is not None:
             return
         async with self._connect_lock:
@@ -217,7 +216,6 @@ class B2StorageBackend:
 
     @staticmethod
     def _get_file_size_sync(fileobj) -> int:
-        """Blocking seek/tell, meant to run in an executor thread."""
         fileobj.seek(0)
         fileobj.seek(0, 2)
         size = fileobj.tell()
@@ -252,7 +250,6 @@ class B2StorageBackend:
         t_start = time.monotonic()
 
         def _progress_callback(bytes_transferred: int) -> None:
-            # Called from aioboto3/boto3's internal transfer threads.
             progress["transferred"] += bytes_transferred
             if total_size > 0:
                 pct = int(progress["transferred"] / total_size * 100)
