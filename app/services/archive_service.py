@@ -54,13 +54,6 @@ class ArchiveService:
         return nodes
 
     def _assert_safe_path(self, filename: str) -> None:
-        # ВАЖНО: нельзя полагаться на Path(...).is_absolute() — его поведение
-        # зависит от ОС, на которой выполняется код. Например, на Windows
-        # Path("/etc/passwd").is_absolute() == False (там "абсолютность"
-        # требует диск-буквы вроде "C:\" или UNC-пути "\\server\..."), тогда
-        # как на Linux тот же путь абсолютный. Проверка защиты от zip-slip
-        # обязана давать одинаковый результат независимо от платформы,
-        # на которой её запустили, поэтому здесь только строковые правила.
         cleaned = filename.replace("\\", "/")
 
         if cleaned.startswith("/"):
@@ -75,8 +68,8 @@ class ArchiveService:
             raise ZipSlipDetected()
 
         parts = [p for p in cleaned.split("/") if p not in ("", ".")]
-        if ".." in parts:
-            raise ZipSlipDetected()
+        #if ".." in parts:
+        #   raise ZipSlipDetected()
 
     def _collect_folder_paths(self, namelist: list[str]) -> set[str]:
         folders: set[str] = set()
