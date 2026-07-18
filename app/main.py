@@ -18,12 +18,22 @@ from app.api.v1.storage_local import router as storage_local_router
 from app.api.v1.users import router as users_router
 from app.core.config import settings
 from app.core.exceptions import AppException
+from app.storage.factory import get_storage_backend
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.arq_pool = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+
+    if settings.STORAGE_BACKEND == "b2":
+        storage = get_storage_backend()
+        await storage.connect()
+
     yield
+
+    if settings.STORAGE_BACKEND == "b2":
+        await get_storage_backend().close()
+
     await app.state.arq_pool.close()
 
 logging.getLogger("botocore").setLevel(logging.DEBUG)
@@ -62,9 +72,3 @@ if settings.STORAGE_BACKEND == "local":
     app.mount("/static", StaticFiles(directory=str(storage_root)), name="static")
 
     app.include_router(storage_local_router, prefix="/api/v1")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=settings.DEBUG)
