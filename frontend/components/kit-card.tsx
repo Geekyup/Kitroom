@@ -1,14 +1,32 @@
+"use client"
+
 import Image from "next/image"
 import Link from "next/link"
-import { Download, Music2 } from "lucide-react"
+import { useLinkStatus } from "next/link"
+import { Download, Loader2, Music2 } from "lucide-react"
 import type { Kit } from "@/lib/data"
 import { formatCount } from "@/lib/data"
 import { KitAuthor } from "@/components/kit-author"
+
+// useLinkStatus умеет читать состояние навигации только из компонента,
+// который отрендерен ВНУТРИ <Link>, поэтому выносим его в дочерний компонент.
+function NavigationOverlay() {
+  const { pending } = useLinkStatus()
+  if (!pending) return null
+  return (
+    <span className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-[1px]">
+      <Loader2 className="size-6 animate-spin text-foreground" />
+    </span>
+  )
+}
 
 export function KitCard({ kit }: { kit: Kit }) {
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-foreground/5">
       <Link href={`/kit/${kit.id}`} className="relative block aspect-square overflow-hidden">
+        {/* Мгновенный визуальный отклик на клик — не ждём RSC-ответ и не зависим
+         * от того, успевает ли встать file-based loading.tsx между кликом и рендером. */}
+        <NavigationOverlay />
         <Image
           src={kit.cover || "/placeholder.svg"}
           alt={`Обложка кита ${kit.title}`}
