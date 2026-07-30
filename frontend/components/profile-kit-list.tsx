@@ -110,6 +110,7 @@ export function ProfileKitList({ kits }: { kits: Kit[] }) {
             <Button
               variant="destructive"
               size="icon-lg"
+              className="border-destructive/30"
               aria-label={`Удалить ${kit.title}`}
               onClick={() => remove(kit.id)}
               disabled={deletingId === kit.id}
