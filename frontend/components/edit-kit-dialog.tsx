@@ -6,6 +6,7 @@ import { X } from "lucide-react"
 import type { Kit } from "@/lib/data"
 import { GENRES } from "@/lib/data"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { authorizedFetch } from "@/lib/auth"
 
 const inputClass =
@@ -108,19 +109,22 @@ export function EditKitDialog({
               <label htmlFor="edit-genre" className="mb-1.5 block text-sm font-medium">
                 Жанр
               </label>
-              <select
-                id="edit-genre"
+              <Select
                 value={genre}
-                onChange={(e) => setGenre(e.target.value)}
-                required
-                className={inputClass}
+                onValueChange={(value) => value && setGenre(value)}
+                items={genreOptions.map((g) => ({ label: g, value: g }))}
               >
-                {genreOptions.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="edit-genre">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {genreOptions.map((g) => (
+                    <SelectItem key={g} value={g}>
+                      {g}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
