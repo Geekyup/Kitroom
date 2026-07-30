@@ -40,16 +40,18 @@ function SelectContent({
 }: SelectPrimitive.Popup.Props) {
   return (
     <SelectPrimitive.Portal>
-      <SelectPrimitive.Positioner sideOffset={6}>
+      <SelectPrimitive.Positioner sideOffset={6} className="z-[60] outline-none">
         <SelectPrimitive.Popup
           data-slot="select-content"
           className={cn(
-            'z-50 max-h-[min(24rem,var(--available-height))] w-[var(--anchor-width)] overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg outline-none transition-[transform,scale,opacity] data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
+            'max-h-[min(24rem,var(--available-height))] w-[var(--anchor-width)] rounded-xl border border-border bg-card p-1 shadow-lg outline-none transition-[transform,scale,opacity] data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
             className,
           )}
           {...props}
         >
-          {children}
+          <SelectPrimitive.List className="max-h-[inherit] overflow-y-auto">
+            {children}
+          </SelectPrimitive.List>
         </SelectPrimitive.Popup>
       </SelectPrimitive.Positioner>
     </SelectPrimitive.Portal>
