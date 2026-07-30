@@ -102,6 +102,7 @@ export function ProfileKitList({ kits }: { kits: Kit[] }) {
             <Button
               variant="outline"
               size="icon-lg"
+              className="hover:border-primary/40 hover:bg-accent hover:text-accent-foreground"
               aria-label={`Редактировать ${kit.title}`}
               onClick={() => setEditingKit(kit)}
             >
