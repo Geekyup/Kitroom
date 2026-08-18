@@ -55,7 +55,7 @@ export default async function PublicProfilePage({
         <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center">
           <div className="relative size-24 shrink-0 overflow-hidden rounded-2xl border border-border">
             <Image
-              src={avatarForUser(profile.avatar_path)}
+              src={avatarForUser(profile.avatar_path, profile.username)}
               alt={`Аватар ${profile.username}`}
               fill
               sizes="96px"
@@ -67,7 +67,6 @@ export default async function PublicProfilePage({
           </div>
         </div>
 
-        {/* Stats */}
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
           {[
             { icon: <Package className="size-5" />, label: "Загружено китов", value: kits.length },
@@ -86,7 +85,6 @@ export default async function PublicProfilePage({
           ))}
         </div>
 
-        {/* Kits */}
         <section className="mt-10">
           <h2 className="mb-4 text-xl font-semibold tracking-tight">Киты автора</h2>
           {kits.length === 0 ? (

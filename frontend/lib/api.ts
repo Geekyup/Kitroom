@@ -1,3 +1,5 @@
+import { avatarPlaceholderFor } from "@/lib/avatar"
+
 const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 const SERVER_API_URL = process.env.API_URL ?? PUBLIC_API_URL
 const API_URL = typeof window === "undefined" ? SERVER_API_URL : PUBLIC_API_URL
@@ -73,7 +75,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const body = await res.json()
       detail = body.detail ?? detail
     } catch {
-      // тело не JSON — оставляем statusText
     }
     throw new ApiError(res.status, detail)
   }
@@ -82,26 +83,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function absoluteMediaUrl(path: string): string {
-  // sound_url/cover_path могут приходить двумя видами:
-  // 1) относительный путь вида "/static/kits/3/..." — старый локальный storage backend,
-  //    нужно склеить с публичным адресом бэкенда.
-  // 2) уже АБСОЛЮТНЫЙ presigned URL от S3-совместимого хранилища (B2/Cloud.ru) —
-  //    начинается с http(s):// и содержит подпись запроса (X-Amz-Signature и т.д.).
-  //    Такой URL трогать нельзя: конкатенация с PUBLIC_API_URL превращает его
-  //    в невалидный адрес вида "http://localhost:8000https://s3.../..." и
-  //    <audio>/<img> тихо перестают грузиться.
   if (/^https?:\/\//i.test(path)) {
     return path
   }
 
-  // ВАЖНО: этот URL всегда попадёт в <img>/<audio> в БРАУЗЕРЕ, даже если функция
-  // вызвана на сервере (SSR) — поэтому всегда берём публичный адрес,
-  // а не внутренний docker-хостнейм (API_URL), иначе картинки/звук будут биты.
   return `${PUBLIC_API_URL}${path}`
 }
 
-// Заглушки без реального cover_path (например, сид-скрипт для теста пагинации)
-// получают одну из готовых обложек по жанру — так каталог не выглядит пустым.
 const GENRE_FALLBACK_COVERS: Record<string, string> = {
   Trap: "/covers/midnight-trap.png",
   "Lo-Fi": "/covers/lofi-dust.png",
@@ -117,8 +105,8 @@ export function coverForKit(item: Pick<ApiKitCatalogItem, "cover_path" | "genre"
   return GENRE_FALLBACK_COVERS[item.genre] ?? FALLBACK_COVER_LIST[item.id % FALLBACK_COVER_LIST.length]
 }
 
-export function avatarForUser(avatarPath: string | null | undefined): string {
-  return avatarPath ? absoluteMediaUrl(avatarPath) : "/placeholder-user.jpg"
+export function avatarForUser(avatarPath: string | null | undefined, username: string): string {
+  return avatarPath ? absoluteMediaUrl(avatarPath) : avatarPlaceholderFor(username)
 }
 
 export const api = {
@@ -139,7 +127,6 @@ export const api = {
   },
 
   downloadKitUrl(slug: string): string {
-    // прямая ссылка для <a href>, не через fetch — браузер сам стартует скачивание
     return `${API_URL}/api/v1/kits/${slug}/download`
   },
 

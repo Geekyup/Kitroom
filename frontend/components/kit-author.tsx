@@ -9,8 +9,6 @@ type KitAuthorProps = {
   username: string
   avatarPath?: string | null
   size?: "sm" | "md"
-  /** Останавливает всплытие клика — нужно, когда автор рендерится
-   * внутри другой кликабельной ссылки (например, карточки кита). */
   stopPropagation?: boolean
 }
 
@@ -23,9 +21,6 @@ export function KitAuthor({ username, avatarPath, size = "sm", stopPropagation }
   const sizes = SIZE_CLASSES[size]
   const { user } = useAuth()
 
-  // Если это кит текущего залогиненного пользователя — ведём в его личный
-  // кабинет /profile (со статистикой и редактированием), а не на публичную
-  // страницу /profile/[username], которую видят посторонние.
   const isOwnProfile = !!user && user.username.toLowerCase() === username.toLowerCase()
   const href = isOwnProfile ? "/profile" : `/profile/${encodeURIComponent(username)}`
 
@@ -37,7 +32,7 @@ export function KitAuthor({ username, avatarPath, size = "sm", stopPropagation }
     >
       <span className={`relative shrink-0 overflow-hidden rounded-full ${sizes.avatar}`}>
         <Image
-          src={avatarForUser(avatarPath)}
+          src={avatarForUser(avatarPath, username)}
           alt={`Аватар ${username}`}
           fill
           sizes="32px"

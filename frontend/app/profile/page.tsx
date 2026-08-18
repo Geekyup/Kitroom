@@ -10,7 +10,7 @@ import { ProfileKitList } from "@/components/profile-kit-list"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
 import { authApi, authorizedFetch, getAccessToken, AuthApiError } from "@/lib/auth"
-import { absoluteMediaUrl, type ApiKitCatalogItem } from "@/lib/api"
+import { absoluteMediaUrl, avatarForUser, type ApiKitCatalogItem } from "@/lib/api"
 import { formatCount, type Kit } from "@/lib/data"
 
 export default function ProfilePage() {
@@ -87,11 +87,6 @@ export default function ProfilePage() {
   useEffect(() => {
     if (authLoading) return
     if (!user) {
-      // Если токена в сторадже нет вообще — сразу на /login.
-      // Если токен есть, но user всё ещё null после того как AuthProvider
-      // закончил проверку (authLoading=false) — значит токен невалиден/просрочен,
-      // тоже уходим на /login. Иначе это, скорее всего, гонка сразу после
-      // Google-редиректа, пока AuthProvider ещё не подхватил токен.
       const token = getAccessToken()
       if (!token) {
         router.push("/login")
@@ -148,12 +143,11 @@ export default function ProfilePage() {
       <SiteHeader />
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6 lg:px-8">
-        {/* Profile header */}
         <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center">
           <div className="group relative size-24 shrink-0">
             <div className="relative size-24 overflow-hidden rounded-2xl border border-border">
               <Image
-                src={user.avatar_path ? absoluteMediaUrl(user.avatar_path) : "/placeholder.svg"}
+                src={avatarForUser(user.avatar_path, user.username)}
                 alt={`Аватар ${user.username}`}
                 fill
                 sizes="96px"
@@ -226,7 +220,6 @@ export default function ProfilePage() {
           </Button>
         </div>
 
-        {/* Stats */}
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
           {stats.map((s) => (
             <div key={s.label} className="flex items-center gap-4 rounded-2xl border border-border bg-card p-5">
@@ -241,7 +234,6 @@ export default function ProfilePage() {
           ))}
         </div>
 
-        {/* Uploaded kits */}
         <section className="mt-10">
           <h2 className="mb-4 text-xl font-semibold tracking-tight">Мои киты</h2>
           {kits === null ? (
