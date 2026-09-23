@@ -12,10 +12,8 @@ from alembic import context
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.config import settings
-from app.db.models.base import Base
-from app.db.models.user import User, RefreshToken, VerificationCode
-from app.db.models.drum_kit import DrumKit
-from app.db.models.drum_kit_node import DrumKitNode
+from app.db.base import Base
+import app.db.models  # noqa: F401 — регистрирует все доменные модели на Base.metadata
 
 config = context.config
 

@@ -1,0 +1,193 @@
+from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import RedirectResponse
+
+from app.auth.deps import get_current_active_user
+from app.auth.models import User
+from app.kits.deps import get_kit_service
+from app.kits.schemas import (
+    KitCatalogItemOut,
+    KitOut,
+    KitStatusOut,
+    KitTreeOut,
+    KitUpdate,
+    KitUploadInitOut,
+)
+from app.kits.service import KitService
+
+router = APIRouter(prefix="/kits", tags=["kits"])
+
+
+@router.post("", response_model=KitOut, status_code=201)
+async def upload_kit(
+    title: str = Form(...),
+    genre: str = Form(...),
+    tags: str = Form(""),
+    description: str | None = Form(None),
+    file: UploadFile = File(...),
+    cover: UploadFile | None = File(None),
+    current_user: User = Depends(get_current_active_user),
+    kit_service: KitService = Depends(get_kit_service),
+) -> KitOut:
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+    kit = await kit_service.create_kit(
+        owner_id=current_user.id,
+        title=title,
+        genre=genre,
+        tags=tag_list,
+        description=description,
+        file=file,
+        cover=cover,
+    )
+    return KitOut.model_validate(kit)
+
+
+class KitUploadInitRequest(BaseModel):
+    title: str
+    genre: str
+    tags: str = ""
+    description: str | None = None
+    content_type: str = "application/zip"
+
+
+@router.post("/upload-url", response_model=KitUploadInitOut, status_code=201)
+async def init_kit_upload(
+    payload: KitUploadInitRequest,
+    current_user: User = Depends(get_current_active_user),
+    kit_service: KitService = Depends(get_kit_service),
+) -> KitUploadInitOut:
+    tag_list = [t.strip() for t in payload.tags.split(",") if t.strip()]
+
+    return await kit_service.init_kit_upload(
+        owner_id=current_user.id,
+        title=payload.title,
+        genre=payload.genre,
+        tags=tag_list,
+        description=payload.description,
+        content_type=payload.content_type,
+    )
+
+
+@router.post("/{kit_id}/confirm-upload", response_model=KitOut)
+async def confirm_kit_upload(
+    kit_id: int,
+    current_user: User = Depends(get_current_active_user),
+    kit_service: KitService = Depends(get_kit_service),
+) -> KitOut:
+    kit = await kit_service.confirm_kit_upload(kit_id, requester_id=current_user.id)
+    return KitOut.model_validate(kit)
+
+
+class CoverUploadInitOut(BaseModel):
+    upload_url: str
+    object_key: str
+
+
+class CoverConfirmRequest(BaseModel):
+    object_key: str
+
+
+@router.post("/{kit_id}/cover-upload-url", response_model=CoverUploadInitOut)
+async def init_cover_upload(
+    kit_id: int,
+    content_type: str = "image/jpeg",
+    current_user: User = Depends(get_current_active_user),
+    kit_service: KitService = Depends(get_kit_service),
+) -> CoverUploadInitOut:
+    object_key, upload_url = await kit_service.init_cover_upload(
+        kit_id, requester_id=current_user.id, content_type=content_type
+    )
+    return CoverUploadInitOut(upload_url=upload_url, object_key=object_key)
+
+
+@router.post("/{kit_id}/cover-confirm-upload", status_code=204)
+async def confirm_cover_upload(
+    kit_id: int,
+    payload: CoverConfirmRequest,
+    current_user: User = Depends(get_current_active_user),
+    kit_service: KitService = Depends(get_kit_service),
+) -> None:
+    await kit_service.confirm_cover_upload(
+        kit_id, requester_id=current_user.id, object_key=payload.object_key
+    )
+
+
+@router.get("", response_model=list[KitCatalogItemOut])
+async def list_catalog(
+    limit: int = 50,
+    offset: int = 0,
+    kit_service: KitService = Depends(get_kit_service),
+) -> list[KitCatalogItemOut]:
+    return await kit_service.list_catalog(limit=limit, offset=offset)
+
+
+@router.get("/me", response_model=list[KitCatalogItemOut])
+async def list_my_kits(
+    current_user: User = Depends(get_current_active_user),
+    kit_service: KitService = Depends(get_kit_service),
+) -> list[KitCatalogItemOut]:
+    return await kit_service.list_my_kits(owner_id=current_user.id)
+
+
+@router.get("/{slug}", response_model=KitOut)
+async def get_kit(
+    slug: str,
+    kit_service: KitService = Depends(get_kit_service),
+) -> KitOut:
+    return await kit_service.get_kit_detail(slug)
+
+
+@router.get("/{slug}/status", response_model=KitStatusOut)
+async def get_kit_status(
+    slug: str,
+    kit_service: KitService = Depends(get_kit_service),
+) -> KitStatusOut:
+    kit = await kit_service.get_kit_status(slug)
+    return KitStatusOut.model_validate(kit)
+
+
+@router.get("/{slug}/tree", response_model=KitTreeOut)
+async def get_kit_tree(
+    slug: str,
+    kit_service: KitService = Depends(get_kit_service),
+) -> KitTreeOut:
+    kit, tree = await kit_service.get_kit_tree(slug)
+    return KitTreeOut(kit_slug=kit.slug, kit_title=kit.title, root=tree)
+
+
+@router.get("/{slug}/download")
+async def download_kit(
+    slug: str,
+    kit_service: KitService = Depends(get_kit_service),
+) -> RedirectResponse:
+    kit = await kit_service.get_kit_for_download(slug)
+    url = await kit_service.storage.get_url(kit.original_zip_path, expires_in=300)
+
+    return RedirectResponse(url=url, status_code=307)
+
+
+@router.patch("/{slug}", response_model=KitOut)
+async def update_kit(
+    slug: str,
+    payload: KitUpdate,
+    current_user: User = Depends(get_current_active_user),
+    kit_service: KitService = Depends(get_kit_service),
+) -> KitOut:
+    return await kit_service.update_kit(
+        slug,
+        requester_id=current_user.id,
+        title=payload.title,
+        genre=payload.genre,
+        tags=payload.tags,
+        description=payload.description,
+    )
+
+
+@router.delete("/{slug}", status_code=204)
+async def delete_kit(
+    slug: str,
+    current_user: User = Depends(get_current_active_user),
+    kit_service: KitService = Depends(get_kit_service),
+) -> None:
+    await kit_service.delete_kit(slug, requester_id=current_user.id)

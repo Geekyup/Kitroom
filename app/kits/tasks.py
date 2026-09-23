@@ -1,0 +1,55 @@
+import logging
+
+from app.core.exceptions import AppException
+from app.db.session import async_session_factory
+from app.kits.archive import ArchiveService
+from app.kits.models import KitStatus, NodeType
+from app.kits.repository import KitRepository, NodeRepository
+
+logger = logging.getLogger("kitroom.worker")
+
+
+async def process_kit(ctx: dict, kit_id: int) -> None:
+    logger.info("kit=%s process_kit СТАРТ", kit_id)
+    async with async_session_factory() as db:
+        from sqlalchemy import text
+        diag = await db.execute(text("SELECT current_database(), inet_server_addr()::text, inet_server_port()"))
+        db_name, db_addr, db_port = diag.one()
+        logger.info("kit=%s worker смотрит в БД: db=%s addr=%s port=%s", kit_id, db_name, db_addr, db_port)
+
+        kit_repo = KitRepository(db)
+        node_repo = NodeRepository(db)
+
+        kit = await kit_repo.get_by_id(kit_id)
+        logger.info("kit=%s найден в БД, original_zip_path=%s", kit_id, kit.original_zip_path)
+        await kit_repo.update_status(kit_id, KitStatus.PROCESSING)
+        logger.info("kit=%s статус -> PROCESSING", kit_id)
+
+        try:
+            await node_repo.delete_by_kit(kit_id)
+
+            archive_service = ArchiveService()
+            nodes = await archive_service.extract_and_validate(
+                zip_key=kit.original_zip_path,
+                kit_id=kit_id,
+            )
+            await node_repo.bulk_insert(nodes)
+
+            sound_count = sum(1 for n in nodes if n.node_type == NodeType.FILE)
+            await kit_repo.update_sound_count(kit_id, sound_count)
+
+            await kit_repo.update_status(kit_id, KitStatus.READY)
+
+        except AppException as e:
+            try:
+                await kit_repo.update_status(kit_id, KitStatus.FAILED, error_message=e.detail)
+            except Exception:
+                raise
+
+        except Exception as e:
+            try:
+                await kit_repo.update_status(
+                    kit_id, KitStatus.FAILED, error_message=f"Unexpected error: {e}"
+                )
+            except Exception:
+                raise

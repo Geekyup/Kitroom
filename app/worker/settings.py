@@ -3,8 +3,8 @@ from arq.connections import RedisSettings
 import app.core.logging
 import app.db.models
 from app.core.config import settings
+from app.kits.tasks import process_kit
 from app.storage.factory import get_storage_backend
-from app.worker.tasks import process_kit
 
 
 async def startup(ctx: dict) -> None:

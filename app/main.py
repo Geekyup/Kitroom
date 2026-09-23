@@ -9,16 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-import app.db.models 
-from app.api.v1.auth import router as auth_router
-from app.api.v1.kits import router as kits_router
-from app.api.v1.kits_download import router as kits_download_router
-from app.api.v1.kits_tree import router as kits_tree_router
-from app.api.v1.storage_local import router as storage_local_router
-from app.api.v1.users import router as users_router
+import app.db.models
+from app.auth.router import router as auth_router
 from app.core.config import settings
 from app.core.exceptions import AppException
+from app.kits.router import router as kits_router
 from app.storage.factory import get_storage_backend
+from app.storage.router import router as storage_local_router
+from app.users.router import public_router as users_public_router
+from app.users.router import router as users_router
 
 
 @asynccontextmanager
@@ -51,16 +50,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
+# /me* эндпоинты исторически жили под /api/v1/auth — сохраняем этот путь,
+# хотя логика теперь в users-модуле.
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(users_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(kits_router, prefix="/api/v1")
-app.include_router(kits_tree_router, prefix="/api/v1")
-app.include_router(kits_download_router, prefix="/api/v1")
-app.include_router(users_router, prefix="/api/v1")
+app.include_router(users_public_router, prefix="/api/v1")
 
 if settings.STORAGE_BACKEND == "local":
     from pathlib import Path
