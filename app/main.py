@@ -56,8 +56,6 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
-# /me* эндпоинты исторически жили под /api/v1/auth — сохраняем этот путь,
-# хотя логика теперь в users-модуле.
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(users_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(kits_router, prefix="/api/v1")

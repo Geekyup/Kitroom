@@ -5,11 +5,9 @@ from pydantic import field_validator, model_validator
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # App
     DEBUG: bool = False
     PROJECT_NAME: str = "DrumKit Service"
 
-    # Database
     DATABASE_URL: str
 
     @field_validator("DATABASE_URL")
@@ -21,21 +19,17 @@ class Settings(BaseSettings):
             return v.replace("postgres://", "postgresql+asyncpg://", 1)
         return v
 
-    # Redis / ARQ
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # JWT
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    # Google OAuth
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""
 
-    # Публичный адрес фронтенда — куда редиректить браузер после google/callback
     FRONTEND_URL: str = "http://localhost:3000"
 
     # Session (для oauth state/nonce)
@@ -57,7 +51,6 @@ class Settings(BaseSettings):
             raise ValueError('STORAGE_BACKEND must be "local" or "b2"')
         return v
 
-    # Storage (Backblaze B2, S3-compatible) — обязательны, только если STORAGE_BACKEND=b2
     B2_KEY_ID: str = ""
     B2_APPLICATION_KEY: str = ""
     B2_BUCKET_NAME: str = ""

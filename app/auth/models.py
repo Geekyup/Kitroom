@@ -24,10 +24,6 @@ class User(Base, TimestampMixin):
     verification_codes: Mapped[list["VerificationCode"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    # DrumKit живёт в app.kits.models — межмодульная связь между доменами.
-    # Оба класса регистрируются на общий Base, поэтому строковая ссылка
-    # разрешается при configure_mappers(), при условии что app.kits.models
-    # импортирован до первого обращения к БД (см. app/db/models.py).
     kits: Mapped[list["DrumKit"]] = relationship(back_populates="owner")
 
 

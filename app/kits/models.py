@@ -39,7 +39,6 @@ class DrumKit(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
-    # User живёт в app.auth.models — межмодульная связь (см. пояснение там же).
     owner: Mapped["User"] = relationship(back_populates="kits")
     nodes: Mapped[list["DrumKitNode"]] = relationship(
         back_populates="kit",
