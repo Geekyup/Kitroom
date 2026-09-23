@@ -30,7 +30,7 @@ jobs:
           SESSION_SECRET_KEY: ci-test-session-secret
           STORAGE_BACKEND: local
           REDIS_URL: redis://localhost:6379/0
-        run: pytest tests/ -v --cov=app --cov-report=term-missing --cov-report=xml
+        run: pytest app/tests/ -v --cov=app --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -52,4 +52,3 @@ jobs:
           file: ./Dockerfile
           push: false
           tags: kitroom-backend:ci
-
